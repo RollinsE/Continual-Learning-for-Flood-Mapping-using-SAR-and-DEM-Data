@@ -1,4 +1,3 @@
-Overview
 This script provides a robust continual learning (CL) and preprocessing pipeline for flood extent mapping using satellite image triplets (SAR, DEM, and masks). 
 It covers tiling, data preprocessing, quality filtering (e.g., NaN masking), experiment orchestration, model training, continual/few-shot learning strategies, and detailed 
 evaluation metric tracking.
