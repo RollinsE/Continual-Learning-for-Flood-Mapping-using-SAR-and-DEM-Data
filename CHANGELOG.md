@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.20 — 2026-08-13
+
+- Fixed equal-area collection mosaicking under newer Rasterio/GDAL versions by keeping valid background value `0` separate from NoData handling during binary-mask reprojection.
+- Preserved coverage through the existing explicit coverage raster, avoiding background pixels being reinterpreted as flood.
+- Updated collection preview colormap handling for current Matplotlib releases without changing the map palette or output semantics.
+
 ## 0.15.19 — 2026-08-13
 
 - Reworked the public README and Streamlit guide for clearer, more natural technical writing while keeping the same functionality and documented limitations.

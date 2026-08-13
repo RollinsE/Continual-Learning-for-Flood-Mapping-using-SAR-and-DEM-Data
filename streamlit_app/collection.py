@@ -115,7 +115,6 @@ def build_collection_mosaic(predictions: Sequence[dict[str, Any]], output_dir: P
                 src_nodata=src.nodata,
                 dst_transform=dst_transform,
                 dst_crs=dst_crs,
-                dst_nodata=0,
                 resampling=Resampling.nearest,
             )
             reproject(
@@ -230,7 +229,7 @@ def _save_preview(values: np.ndarray, path: Path, *, discrete: bool) -> Path:
     # A visible neutral background prevents pixels outside the uploaded tile
     # footprints from being mistaken for valid non-flood predictions.
     cmap = plt.get_cmap("viridis").copy()
-    cmap.set_bad("#bdbdbd")
+    cmap = cmap.with_extremes(bad="#bdbdbd")
     masked = np.ma.masked_invalid(view.astype(np.float32, copy=False))
 
     fig, ax = plt.subplots(figsize=(10, 7))

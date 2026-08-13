@@ -8,7 +8,7 @@ README = (ROOT / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="flood-extent-mapping",
-    version="0.15.19",
+    version="0.15.20",
     description="Flood extent mapping with Sentinel-1 SAR and DEM data, including training, evaluation, continual learning and deployment",
     long_description=README,
     long_description_content_type="text/markdown",

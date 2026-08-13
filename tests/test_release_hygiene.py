@@ -12,11 +12,11 @@ ROOT = Path(__file__).parents[1]
 
 
 def test_release_versions_are_consistent():
-    assert __version__ == "0.15.19"
-    assert 'version="0.15.19"' in (ROOT / "setup.py").read_text(encoding="utf-8")
-    assert "**Release 0.15.19**" in (ROOT / "README.md").read_text(encoding="utf-8")
+    assert __version__ == "0.15.20"
+    assert 'version="0.15.20"' in (ROOT / "setup.py").read_text(encoding="utf-8")
+    assert "**Release 0.15.20**" in (ROOT / "README.md").read_text(encoding="utf-8")
     citation = yaml.safe_load((ROOT / "CITATION.cff").read_text(encoding="utf-8"))
-    assert citation["version"] == "0.15.19"
+    assert citation["version"] == "0.15.20"
     assert citation["license"] == "MIT"
 
 
