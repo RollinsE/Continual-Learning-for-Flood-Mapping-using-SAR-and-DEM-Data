@@ -1,0 +1,103 @@
+seed: 42
+image_size: 512
+trainer:
+  cpu: false
+  amp: false
+  amp_full_precision_retry: true
+  progress_bar: true
+  progress_log_interval: 0
+  progress_label: FloodSegmentation
+  batch_size: 8
+  num_workers: 2
+  max_epochs: 6
+  train_metrics:
+  - iou
+  val_metrics:
+  - f1
+  - iou
+  - mcc
+  - precision
+  - recall
+  monitor: f1
+  patience: 99
+  validate_every: 1
+  save_last: true
+  save_epoch_checkpoints: false
+  grad_clip_norm: 1.0
+  detect_anomaly: false
+  skip_nonfinite_batches: true
+  max_skipped_batch_fraction: 0.0
+  threshold_sweep: true
+  thresholds:
+  - 0.8
+  threshold_metric: f1
+  monitor_threshold_sweep: true
+  metric_mode: global
+data:
+  path: ''
+  in_channels: 2
+  include_dem: false
+  input_modalities:
+  - vv
+  - vh
+  class_weights: null
+  mask_body_ratio: 0.0
+  train_mask_body_ratio: 0.0
+  val_mask_body_ratio: 0.0
+  test_mask_body_ratio: 0.0
+  weighted_sampling: false
+  foreground_balanced_sampling: false
+  stratified_sampling: false
+  event_balanced_sampling: false
+  augmentation_profile: composite
+  sparse_crop_supervision: false
+  hard_negative_region_sampling: false
+  hard_positive_region_sampling: false
+  modality_dropout: false
+  normalization_stats_path: null
+  normalization_mode: robust_percentile
+  pos_weight_from_train: true
+  pos_weight_max: 20.0
+  cache_dir: outputs/cache
+  clear_cache: false
+model:
+  weights_source: imagenet
+  encoder: resnet34
+  decoder: unet
+  pretrained: true
+  freeze: false
+  multibranch: false
+  output_stride: 16
+  act: relu
+  norm: std
+  dropout2d: false
+  transforms: ''
+loss:
+  target: bce_tversky
+  alpha: 0.3
+  beta: 0.7
+  gamma: 1.0
+  focal_gamma: 2.0
+  focal_alpha: 1.0
+  bce_weight: 0.5
+  focal_weight: 0.5
+  tversky_weight: 0.5
+  reduction: mean
+optimizer:
+  target: adam
+  lr: 0.0001
+  encoder_lr: 0.0001
+  decoder_lr: 0.0001
+  momentum: 0.9
+  weight_decay: 0.0001
+scheduler:
+  target: poly
+debug: false
+name: final_unet_resnet34_vv_vh
+output_folder: outputs
+num_samples: 8
+visualize: false
+comment: locked-reference-unet-resnet34-vv-vh
+version: ''
+resume: false
+resume_from: null

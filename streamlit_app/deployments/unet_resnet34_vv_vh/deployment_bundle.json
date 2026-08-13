@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "manifest": "deployment_manifest.yaml",
+  "model_name": "unet_resnet34_vv_vh",
+  "portable": true,
+  "files": [
+    {
+      "role": "normalization_stats",
+      "path": "assets/normalization/normalization_stats.json",
+      "size_bytes": 1589,
+      "sha256": "455a268a02bb3a4f3d77ce95ec9a9ae27e69a8ebda67297e1ddf5ee4e99157dc"
+    },
+    {
+      "role": "member_01_config",
+      "path": "assets/configs/member_01_config.yaml",
+      "size_bytes": 5264,
+      "sha256": "c7debbe41f76dfe23cae16acb2d2f2eed10fe684fe6f7f61119e23e273034888"
+    },
+    {
+      "role": "member_01_checkpoint",
+      "path": "assets/checkpoints/member_01_checkpoint.pth",
+      "size_bytes": 95679185,
+      "sha256": "31ba707b3fbbd05bdc939de2f39eb9daa788ed009cd8591d3caff116098bfd2e"
+    }
+  ]
+}

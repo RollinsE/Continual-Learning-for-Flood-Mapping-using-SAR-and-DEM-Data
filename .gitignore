@@ -1,0 +1,61 @@
+# Python caches and test output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Runtime data and outputs
+data/*
+!data/.gitignore
+outputs/*
+!outputs/.gitignore
+.runtime_smoke/
+*.ckpt
+*.pth
+*.pt
+*.onnx
+*.tif
+*.tiff
+*.zip
+*.7z
+
+# Logs and environment files
+*.log
+.env
+.env.*
+
+# Local and IDE files
+.vscode/
+.idea/
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+
+# The public Streamlit deployment bundle is intentionally tracked. Checkpoints
+# under this path are stored with Git LFS according to .gitattributes.
+!streamlit_app/deployment/
+!streamlit_app/deployment/**
+
+# Public Streamlit deployment catalogues are intentionally tracked. Checkpoints
+# inside these directories use Git LFS according to .gitattributes.
+!streamlit_app/deployments/
+!streamlit_app/deployments/**
+
+# Never publish runtime/export logs
+*.log

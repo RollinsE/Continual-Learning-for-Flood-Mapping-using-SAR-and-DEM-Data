@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "Please cite this software release and the MMFlood dataset publication when using the reference data."
+title: "Flood Extent Mapping"
+type: software
+authors:
+  - family-names: "Edeh"
+    given-names: "Rollins"
+version: "0.15.19"
+date-released: "2026-08-12"
+license: MIT
+keywords:
+  - flood mapping
+  - semantic segmentation
+  - Sentinel-1
+  - continual learning
+  - remote sensing
+preferred-citation:
+  type: article
+  title: "MMFlood: A Multimodal Dataset for Flood Delineation From Satellite Imagery"
+  authors:
+    - family-names: "Montello"
+      given-names: "Fabio"
+    - family-names: "Arnaudo"
+      given-names: "Edoardo"
+    - family-names: "Rossi"
+      given-names: "Claudio"
+  journal: "IEEE Access"
+  volume: 10
+  year: 2022
+  start: 96774
+  end: 96787
+  doi: "10.1109/ACCESS.2022.3205419"

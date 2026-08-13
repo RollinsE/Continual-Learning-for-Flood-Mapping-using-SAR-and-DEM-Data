@@ -1,0 +1,190 @@
+seed: 42
+image_size: 512
+trainer:
+  cpu: false
+  amp: false
+  progress_bar: true
+  progress_log_interval: 0
+  progress_label: FloodSegmentation
+  batch_size: 8
+  num_workers: 2
+  max_epochs: 6
+  train_metrics:
+  - iou
+  val_metrics:
+  - f1
+  - iou
+  - mcc
+  - precision
+  - recall
+  monitor: f1
+  patience: 99
+  validate_every: 1
+  save_last: true
+  save_epoch_checkpoints: false
+  extend_epochs: null
+  reset_early_stopping_on_resume: false
+  temperature: 2.0
+  temp_epochs: 20
+  grad_clip_norm: 1.0
+  detect_anomaly: false
+  skip_nonfinite_batches: true
+  amp_full_precision_retry: true
+  max_skipped_batch_fraction: 0.0
+  threshold_sweep: true
+  event_macro_validation: false
+  thresholds:
+  - 0.8
+  threshold_metric: f1
+  monitor_threshold_sweep: true
+  metric_mode: both
+  group_dro: false
+  group_dro_eta: 0.01
+  group_dro_min_weight: 0.001
+  group_dro_warmup_epochs: 1
+data:
+  path: .
+  train_source_split: train
+  val_source_split: val
+  train_include_events: []
+  train_exclude_events: []
+  val_include_events: []
+  val_exclude_events: []
+  in_channels: 2
+  include_dem: false
+  input_modalities:
+  - vv
+  - vh
+  class_weights: null
+  mask_body_ratio: 0.0
+  train_mask_body_ratio: 0.0
+  val_mask_body_ratio: 0.0
+  test_mask_body_ratio: 0.0
+  weighted_sampling: false
+  foreground_balanced_sampling: false
+  foreground_sample_ratio: 0.65
+  foreground_min_ratio: 0.0
+  weighted_samples_multiplier: 1.0
+  sample_smoothing: 0.8
+  augmentation_profile: composite
+  disable_random_crop: false
+  disable_elastic: false
+  disable_grid_distortion: false
+  disable_sar_noise: false
+  sparse_crop_supervision: false
+  sparse_crop_normal_fraction: 0.5
+  sparse_crop_flood_fraction: 0.25
+  sparse_crop_hard_background_fraction: 0.25
+  sparse_crop_sizes:
+  - 256
+  - 320
+  - 384
+  - 448
+  sparse_crop_attempts: 24
+  sparse_crop_hard_background_max_fg_ratio: 0.001
+  sparse_crop_min_valid_ratio: 0.5
+  normalization_stats_path: ../normalization/normalization_stats.json
+  normalization_mode: robust_percentile
+  modality_dropout: false
+  modality_dropout_prob: 0.0
+  drop_modalities:
+  - dem
+  stratified_sampling: false
+  event_balanced_sampling: false
+  event_balance_power: 0.5
+  event_tile_weight_cap: 5.0
+  hard_example_sampling: false
+  hard_example_csv: null
+  hard_example_categories:
+  - false_negative_low_recall
+  - poor_overlap
+  - false_positive_empty
+  - false_negative_missed
+  hard_example_fg_bins:
+  - tiny
+  - small
+  hard_example_max_f1: 0.3
+  hard_example_weight: 4.0
+  hard_example_max_fraction: 0.6
+  hard_positive_region_sampling: false
+  hard_positive_manifest: null
+  hard_positive_region_weight: 3.0
+  hard_positive_region_max_fraction: 0.2
+  hard_positive_crop_probability: 1.0
+  hard_negative_region_sampling: false
+  hard_negative_manifest: null
+  hard_negative_region_weight: 4.0
+  hard_negative_region_max_fraction: 0.35
+  hard_negative_crop_probability: 1.0
+  pos_weight_from_train: true
+  pos_weight_max: 20.0
+  fg_bin_edges:
+  - 0.0
+  - 0.005
+  - 0.02
+  - 0.1
+  fg_bin_sample_weights:
+  - 0.2
+  - 0.2
+  - 0.25
+  - 0.25
+  - 0.1
+  cache_hash: e6d0f92da88809402caabb8e53ecc5a37c76a86f
+  cache_dir: cache
+  clear_cache: false
+model:
+  encoder: resnet34
+  decoder: unet
+  pretrained: true
+  freeze: false
+  multibranch: false
+  output_stride: 16
+  act: relu
+  norm: std
+  dropout2d: false
+  transforms: "CallableCompose(HorizontalFlip(p=0.5), VerticalFlip(p=0.5), RandomRotate90(p=0.5),\
+    \ ElasticTransform(p=0.2, alpha=1.0, approximate=False, border_mode=0, fill=0.0,\
+    \ fill_mask=0.0, interpolation=1, keypoint_remapping_method='mask', mask_interpolation=0,\
+    \ noise_distribution='gaussian', same_dxdy=False, sigma=50.0), GridDistortion(p=0.2,\
+    \ border_mode=0, distort_limit=(-0.3, 0.3), fill=0.0, fill_mask=0.0, interpolation=1,\
+    \ keypoint_remapping_method='mask', mask_interpolation=0, normalized=True, num_steps=5),\
+    \ Rotate(p=0.5, border_mode=0, crop_border=False, fill=0.0, fill_mask=0.0, interpolation=1,\
+    \ limit=(-30.0, 30.0), mask_interpolation=0, rotate_method='largest_box'), OneOf([\n\
+    \  GaussianBlur(p=0.5, blur_limit=(3, 7), sigma_limit=(0.5, 3.0)),\n  RandomBrightnessContrast(p=0.2,\
+    \ brightness_by_max=True, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2,\
+    \ 0.2), ensure_safe_range=False),\n  CoarseDropout(p=1.0, fill=0.0, fill_mask=None,\
+    \ hole_height_range=(0.1, 0.25), hole_width_range=(0.1, 0.25), num_holes_range=(1,\
+    \ 8)),\n], p=0.5))Compose([\n], p=1.0, bbox_params=None, keypoint_params=None,\
+    \ additional_targets={}, is_check_shapes=True)Compose([\n], p=1.0, bbox_params=None,\
+    \ keypoint_params=None, additional_targets={}, is_check_shapes=True)"
+loss:
+  target: bce_tversky
+  alpha: 0.3
+  beta: 0.7
+  gamma: 1.0
+  focal_gamma: 2.0
+  focal_alpha: 1.0
+  bce_weight: 0.5
+  focal_weight: 0.5
+  tversky_weight: 0.5
+  reduction: mean
+optimizer:
+  target: adam
+  lr: 0.0001
+  encoder_lr: 0.0001
+  decoder_lr: 0.0001
+  momentum: 0.9
+  weight_decay: 0.0001
+scheduler:
+  target: poly
+debug: false
+name: final_unet_resnet34_vv_vh_20260728
+output_folder: outputs
+num_samples: 8
+visualize: false
+comment: unet-resnet34-vv-vh-dem-bce-tversky-event-balanced
+version: ''
+init_checkpoint: null
+init_channel_adaptation: strict
+resume: false
+resume_from: null

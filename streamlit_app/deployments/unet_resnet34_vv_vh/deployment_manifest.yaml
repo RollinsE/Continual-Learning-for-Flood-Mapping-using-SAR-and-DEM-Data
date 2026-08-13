@@ -1,0 +1,51 @@
+schema_version: 2
+model_name: unet_resnet34_vv_vh
+mode: single
+bundle:
+  portable: true
+  path_base: manifest_directory
+  inventory: deployment_bundle.json
+members:
+- config: assets/configs/member_01_config.yaml
+  checkpoint: assets/checkpoints/member_01_checkpoint.pth
+ensemble_method: null
+operating_point:
+  threshold: 0.8
+  min_component_area: 0
+inputs:
+  modalities:
+  - vv
+  - vh
+  normalization_mode: robust_percentile
+  normalization_stats_path: assets/normalization/normalization_stats.json
+  sar_contract: Analysis-ready GeoTIFF. Either one file with VV band 1 and VH band
+    2, or paired VV/VH files discovered from a scene folder.
+  dem_contract: Single-band DEM GeoTIFF aligned to SAR or resampleable to the SAR
+    grid.
+inference:
+  mode: sliding_window
+  window_size: 512
+  window_overlap: 128
+  window_batch_size: 1
+  window_blend: uniform
+visual_outputs:
+  previews:
+  - vv
+  - vh
+  - dem
+  - false_colour
+  prediction:
+  - probability_heatmap
+  - binary_mask_overlay
+  explanation:
+  - positive_evidence
+  - ensemble_uncertainty
+  - optional_per_modality_occlusion
+outputs:
+  mask_values:
+    '0': background
+    '1': flood
+  probability: Optional float32 GeoTIFF containing flood probability before thresholding.
+  report: Optional HTML report with input previews, prediction overlays, uncertainty
+    and explanation panels.
+notes: Selected U-Net ResNet34 VV+VH flood-extent deployment.

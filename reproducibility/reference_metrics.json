@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "release": "0.11.0",
+  "model": {
+    "architecture": "unet",
+    "encoder": "resnet34",
+    "modalities": ["vv", "vh"],
+    "seed": 42,
+    "training_epochs": 6,
+    "selected_epoch": 4,
+    "threshold": 0.8
+  },
+  "dataset": {
+    "train_tiles": 3981,
+    "validation_tiles": 324,
+    "test_tiles": 386
+  },
+  "cross_validation_calibration": {
+    "training_events": 54,
+    "folds": 5,
+    "event_macro_f1": 0.4199612588,
+    "worst_event_f1": 0.1518158778,
+    "global_f1": 0.4261445703
+  },
+  "final_validation": {
+    "f1": 0.4596,
+    "selected_epoch": 4
+  },
+  "test": {
+    "f1": 0.5471,
+    "iou": 0.3765,
+    "precision": 0.4528,
+    "recall": 0.6909,
+    "mcc": 0.5358,
+    "empty_tile_false_positive_rate": 0.0,
+    "nonempty_tile_recall": 0.9870
+  }
+}

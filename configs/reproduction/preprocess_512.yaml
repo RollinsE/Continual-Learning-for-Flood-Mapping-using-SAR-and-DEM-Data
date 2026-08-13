@@ -1,0 +1,31 @@
+data_source: ''
+data_processed: ''
+summary_file: ''
+subset:
+- train
+- val
+- test
+tiling: true
+scale:
+- 1
+tile_size: 512
+tile_max_overlap: 128
+make_context: false
+sar_transform: db10
+decibel: true
+colorize: false
+clip_dem: true
+morphology: true
+morph_kernel: 5
+nan_threshold: 0.75
+mask_flood_values:
+- 1
+mask_background_values:
+- 0
+- 2
+mask_ignore_values:
+- 255
+preserve_mask_ignore: true
+align_to_reference_grid: false
+vv_multiplier: 5.0
+vh_multiplier: 10.0

@@ -1,0 +1,7 @@
+# Portable deployment checkpoints may exceed GitHub's ordinary per-file limit.
+streamlit_app/deployment/assets/checkpoints/*.pth filter=lfs diff=lfs merge=lfs -text
+streamlit_app/deployment/assets/checkpoints/*.ckpt filter=lfs diff=lfs merge=lfs -text
+streamlit_app/deployments/**/assets/checkpoints/*.pth filter=lfs diff=lfs merge=lfs -text
+streamlit_app/deployments/**/assets/checkpoints/*.ckpt filter=lfs diff=lfs merge=lfs -text
+*.pth filter=lfs diff=lfs merge=lfs -text
+*.ckpt filter=lfs diff=lfs merge=lfs -text

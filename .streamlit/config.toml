@@ -1,0 +1,5 @@
+[server]
+maxUploadSize = 200
+
+[client]
+showErrorDetails = false

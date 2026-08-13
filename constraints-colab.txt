@@ -1,0 +1,5 @@
+# Tested binary stack for Google Colab / Python 3.12.
+# Install this stack before importing NumPy/SciPy in notebook cells.
+numpy==2.3.5
+scipy==1.17.0
+rasterio==1.5.0

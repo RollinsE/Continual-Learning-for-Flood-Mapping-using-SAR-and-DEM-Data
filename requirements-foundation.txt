@@ -1,0 +1,6 @@
+# Registered Earth-observation pretrained model providers.
+# Included automatically by both requirements.txt and requirements-colab.txt.
+torchgeo==0.9.0
+terratorch==1.2.8
+huggingface-hub>=0.34,<2.0
+safetensors>=0.5,<1.0
