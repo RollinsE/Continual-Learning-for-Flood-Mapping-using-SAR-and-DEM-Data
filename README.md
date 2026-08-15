@@ -1,7 +1,5 @@
 # Flood Extent Mapping
 
-**Release 0.15.20**
-
 Flood Extent Mapping is a modular Python pipeline for training, evaluating and deploying flood-segmentation models using Sentinel-1 SAR and DEM data. It supports standard training and continual-learning experiments, event-level cross-validation, several model and pretraining options, detailed error analysis, portable deployment bundles and a Streamlit app for running predictions on new scenes.
 
 The reference deployment uses Sentinel-1 VV and VH. DEM and derived terrain features are supported where the selected model requires them, so the package is not tied to a single input combination.
