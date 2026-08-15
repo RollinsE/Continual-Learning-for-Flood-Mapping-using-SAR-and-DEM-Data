@@ -1,6 +1,6 @@
 # Notice
 
-This repository is derived from and extends the original MMFlood project by Fabio Montello, Edoardo Arnaudo, and Claudio Rossi (LINKS Foundation):
+This repository builds on and extends the original MMFlood codebase by Fabio Montello, Edoardo Arnaudo, and Claudio Rossi (LINKS Foundation):
 
 - upstream code: <https://github.com/edornd/mmflood>
 - paper: *MMFlood: A Multimodal Dataset for Flood Delineation From Satellite Imagery*, IEEE Access 10 (2022), 96774–96787

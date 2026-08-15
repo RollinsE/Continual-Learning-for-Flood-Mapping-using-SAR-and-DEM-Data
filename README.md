@@ -10,9 +10,9 @@ The project runs through the `floodmap` command-line interface and is designed f
 
 ## Dataset and attribution
 
-The reference experiments use the **MMFlood dataset**. MMFlood is the dataset name, not the name of this application. Dataset-specific configuration and mask conventions therefore still use `mmflood` where that is technically accurate, for example `configs/preprocess_mmflood.yaml`.
+The reference experiments use the **MMFlood dataset** for flood delineation from Sentinel-1 SAR imagery and supporting elevation data. Dataset-specific configuration and mask conventions retain the `mmflood` name where appropriate, for example `configs/preprocess_mmflood.yaml`.
 
-This repository includes and extends code from the original MMFlood project by Fabio Montello, Edoardo Arnaudo and Claudio Rossi (LINKS Foundation), released under the MIT licence. The dataset paper is *MMFlood: A Multimodal Dataset for Flood Delineation From Satellite Imagery*, IEEE Access 10 (2022), 96774–96787, DOI `10.1109/ACCESS.2022.3205419`.
+This repository builds on and extends the original MMFlood codebase by Fabio Montello, Edoardo Arnaudo and Claudio Rossi (LINKS Foundation), released under the MIT licence. The accompanying dataset paper is *MMFlood: A Multimodal Dataset for Flood Delineation From Satellite Imagery*, IEEE Access 10 (2022), 96774–96787, DOI `10.1109/ACCESS.2022.3205419`.
 
 ## Reference model
 
