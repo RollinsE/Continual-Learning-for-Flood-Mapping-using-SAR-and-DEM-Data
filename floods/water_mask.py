@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import json
 import urllib.request
+from urllib.parse import urlparse
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
 STAC_SEARCH_URL = "https://planetarycomputer.microsoft.com/api/stac/v1/search"
-SAS_TOKEN_URL = "https://planetarycomputer.microsoft.com/api/sas/v1/token/jrc-gsw"
+SAS_TOKEN_URL = "https://planetarycomputer.microsoft.com/api/sas/v1/token"
 JRC_COLLECTION = "jrc-gsw"
 JRC_ASSET = "occurrence"
 DEFAULT_OCCURRENCE_THRESHOLD = 50
@@ -41,6 +42,28 @@ def _signed(href: str, token: str) -> str:
     return f"{href}{'&' if '?' in href else '?'}{token}"
 
 
+def _storage_location(href: str) -> Tuple[str, str]:
+    """Azure storage account and container of a blob URL (``https://<account>.blob.core.windows.net/<container>/...``)."""
+    parsed = urlparse(href)
+    account = parsed.netloc.split(".", 1)[0]
+    container = parsed.path.lstrip("/").split("/", 1)[0]
+    if not account or not container:
+        raise ValueError(f"Not an Azure blob URL: {href}")
+    return account, container
+
+
+def _sign_all(hrefs: Sequence[str]) -> list:
+    """Append a Planetary Computer SAS token to each URL; tokens are issued per storage container."""
+    tokens: Dict[Tuple[str, str], str] = {}
+    signed = []
+    for href in hrefs:
+        location = _storage_location(href)
+        if location not in tokens:
+            tokens[location] = _request_json(f"{SAS_TOKEN_URL}/{location[0]}/{location[1]}")["token"]
+        signed.append(_signed(href, tokens[location]))
+    return signed
+
+
 def occurrence_on_grid(crs: Any, transform: Any, shape: Sequence[int]) -> np.ndarray:
     """JRC occurrence (0-100 %, 255 = no data) resampled onto a raster grid (nearest neighbour)."""
     import rasterio
@@ -55,12 +78,12 @@ def occurrence_on_grid(crs: Any, transform: Any, shape: Sequence[int]) -> np.nda
     hrefs = [href for href in hrefs if href]
     if not hrefs:
         raise RuntimeError(f"No JRC surface-water tiles overlap the scene (bbox {tuple(round(v, 4) for v in bbox)}).")
-    token = _request_json(SAS_TOKEN_URL)["token"]
+    signed_hrefs = _sign_all(hrefs)
 
     occurrence = np.full((height, width), 255, dtype=np.uint8)
     with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", GDAL_HTTP_MAX_RETRY="5", GDAL_HTTP_RETRY_DELAY="2"):
-        for href in hrefs:
-            with rasterio.open(_signed(href, token)) as source:
+        for href in signed_hrefs:
+            with rasterio.open(href) as source:
                 warped = np.full((height, width), 255, dtype=np.uint8)
                 reproject(source=rasterio.band(source, 1), destination=warped,
                           src_transform=source.transform, src_crs=source.crs, src_nodata=255,

@@ -23,3 +23,19 @@ def test_permanent_water_mask_reports_coverage(monkeypatch):
 def test_signed_href_appends_token():
     assert water_mask._signed("https://x/a.tif", "st=1&sig=2") == "https://x/a.tif?st=1&sig=2"
     assert water_mask._signed("https://x/a.tif?v=1", "sig=2") == "https://x/a.tif?v=1&sig=2"
+
+
+def test_tokens_are_requested_per_storage_container(monkeypatch):
+    requested = []
+
+    def fake_request(url, payload=None, timeout=60.0):
+        requested.append(url)
+        return {"token": "sig=" + url.rsplit("/", 1)[-1]}
+
+    monkeypatch.setattr(water_mask, "_request_json", fake_request)
+    hrefs = ["https://acct.blob.core.windows.net/jrc/occurrence/a.tif",
+             "https://acct.blob.core.windows.net/jrc/occurrence/b.tif",
+             "https://other.blob.core.windows.net/data/c.tif"]
+    signed = water_mask._sign_all(hrefs)
+    assert requested == [water_mask.SAS_TOKEN_URL + "/acct/jrc", water_mask.SAS_TOKEN_URL + "/other/data"]
+    assert signed[0] == hrefs[0] + "?sig=jrc" and signed[2] == hrefs[2] + "?sig=data"
