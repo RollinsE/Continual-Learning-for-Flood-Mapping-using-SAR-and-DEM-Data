@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import shutil
 from glob import glob
 from pathlib import Path
 from typing import Callable, Counter, Dict, List, Optional, Set, Tuple, Union
@@ -134,6 +135,30 @@ def _delete_group(*paths: Tuple[Path, ...]) -> None:
             os.remove(path)
 
 
+_PROCESSED_MODALITY_DIRS = ("sar", "dem", "mask", "derived", "weight", "context")
+
+
+def _prepare_subset_output(subset_dir: Path, overwrite: bool = False) -> None:
+    """Refuse to tile into a split folder that already holds tiles, unless overwriting.
+
+    Tiles are named by scene and pixel offset, so a re-run with different settings
+    (tile size, overlap, transforms) would otherwise mix old and new tiles silently.
+    """
+    subset_dir = Path(subset_dir)
+    existing = [subset_dir / name for name in _PROCESSED_MODALITY_DIRS if (subset_dir / name).exists()]
+    has_files = any(any(path.rglob("*.tif")) for path in existing)
+    if not has_files:
+        return
+    if not overwrite:
+        raise FileExistsError(
+            f"{subset_dir} already contains processed tiles. Use a new --data-processed folder, "
+            "or set overwrite_existing: true (CLI --overwrite-existing) to delete and rebuild this split."
+        )
+    for path in existing:
+        LOG.info("Removing existing processed tiles: %s", path)
+        shutil.rmtree(path)
+
+
 def _gather_files(sar_glob: Path,
                   dem_glob: Path,
                   mask_glob: Path,
@@ -175,14 +200,34 @@ def _gather_files(sar_glob: Path,
     return sar_files, dem_files, msk_files
 
 
+def _sar_nodata_to_nan(data: np.ndarray) -> np.ndarray:
+    """Return float32 linear backscatter with no-data marked as NaN.
+
+    Sentinel-1 GRD products encode no-data (e.g. outside the swath) as 0, and
+    linear backscatter is strictly positive, so non-positive and non-finite
+    values are treated as missing rather than as very dark (water-like) pixels.
+    """
+    data = np.asarray(data, dtype=np.float32)
+    return np.where(np.isfinite(data) & (data > 0.0), data, np.nan).astype(np.float32, copy=False)
+
+
 def _sar_db10(data: np.ndarray):
-    """Convert positive SAR backscatter values to 10*log10 units."""
-    return 10.0 * np.log10(np.maximum(data, F16_EPS))
+    """Convert positive linear SAR backscatter to dB; no-data becomes NaN."""
+    data = _sar_nodata_to_nan(data)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return (10.0 * np.log10(np.maximum(data, F16_EPS))).astype(np.float32, copy=False)
 
 
 def _sar_log1p(data: np.ndarray):
-    """Apply a numerically stable log1p transform to positive SAR values."""
-    return np.log10(1.0 + np.maximum(data, 0.0) + F16_EPS)
+    """log10(1 + x) transform for positive SAR values; no-data becomes NaN."""
+    data = _sar_nodata_to_nan(data)
+    with np.errstate(invalid="ignore"):
+        return np.log10(1.0 + data + F16_EPS).astype(np.float32, copy=False)
+
+
+def _sar_linear(data: np.ndarray):
+    """Keep linear SAR values; no-data becomes NaN."""
+    return _sar_nodata_to_nan(data)
 
 
 def _build_sar_transform(config: PreparationConfig):
@@ -192,7 +237,7 @@ def _build_sar_transform(config: PreparationConfig):
         return _rgb_ratio
     mode = str(getattr(config, "sar_transform", "db10") or "linear").lower().replace("-", "_")
     if mode in {"linear", "none"}:
-        return None
+        return _sar_linear
     if mode in {"db10", "db", "decibel"}:
         return _sar_db10
     if mode in {"log1p", "log"}:
@@ -212,13 +257,82 @@ def _rgb_ratio(data: np.ndarray):
     return np.clip(np.stack((r, g, b), axis=0), 0, 1)
 
 
+# Elevations outside this range are treated as DEM voids/fill values (e.g. -32768, -9999).
+DEM_VALID_MIN = -1000.0
+DEM_VALID_MAX = 9000.0
+
+
+def _dem_nodata_to_nan(data: np.ndarray) -> np.ndarray:
+    """Return float32 DEM values with voids and implausible fill values marked as NaN."""
+    data = np.asarray(data, dtype=np.float32)
+    valid = np.isfinite(data) & (data >= DEM_VALID_MIN) & (data <= DEM_VALID_MAX)
+    return np.where(valid, data, np.nan).astype(np.float32, copy=False)
+
+
 def _clip_dem(data: np.ndarray):
+    """Mark DEM voids as NaN, then clip valid elevations to [-100, 6000] metres."""
+    data = _dem_nodata_to_nan(data)
+    with np.errstate(invalid="ignore"):
+        return np.clip(data, -100.0, 6000.0).astype(np.float32, copy=False)
+
+
+def _prepare_source_array(image: np.ndarray, image_type: ImageType, src_nodata) -> np.ndarray:
+    """Mark declared source no-data as NaN for continuous rasters (SAR/DEM)."""
+    if image_type == ImageType.MASK:
+        return image
+    image = np.asarray(image, dtype=np.float32).copy()
+    if src_nodata is not None:
+        try:
+            nodata_value = float(src_nodata)
+        except (TypeError, ValueError):
+            nodata_value = None
+        if nodata_value is not None and np.isfinite(nodata_value):
+            image[image == nodata_value] = np.nan
+    return image
+
+
+def _output_profile_for(profile: dict, processed_img: np.ndarray, image_type: ImageType) -> dict:
+    """Return an output profile whose dtype/nodata match the processed array."""
+    profile = profile.copy()
+    profile.update(height=processed_img.shape[1], width=processed_img.shape[2], count=processed_img.shape[0], driver="GTiff")
+    if image_type == ImageType.MASK:
+        profile.update(dtype="uint8", nodata=255)
+    else:
+        profile.update(dtype="float32", nodata=float("nan"))
+    if not profile.get("tiled", False):
+        profile.pop("blockxsize", None)
+        profile.pop("blockysize", None)
+    return profile
+
+
+def _grid_signature(path: Path) -> dict:
+    with rasterio.open(str(path), mode="r") as src:
+        return {"width": src.width, "height": src.height, "transform": src.transform, "crs": src.crs}
+
+
+def _check_same_grid(sar_path: Path, dem_path: Path, mask_path: Path) -> None:
+    """Raise when SAR, DEM and mask do not share one pixel grid.
+
+    Without ``align_to_reference_grid`` the three rasters are tiled by pixel
+    index, so any difference in shape, transform or CRS silently pairs the
+    wrong ground locations.
     """
-        MinMax the DEM between -100 and 6000 meters
-    """
-    data[data < -100] = -100
-    data[data > 6000] = 6000
-    return data
+    reference = _grid_signature(sar_path)
+    for label, path in (("DEM", dem_path), ("mask", mask_path)):
+        other = _grid_signature(path)
+        problems = []
+        if (other["width"], other["height"]) != (reference["width"], reference["height"]):
+            problems.append(f"shape {other['height']}x{other['width']} != {reference['height']}x{reference['width']}")
+        if reference["crs"] is not None and other["crs"] is not None and other["crs"] != reference["crs"]:
+            problems.append(f"CRS {other['crs']} != {reference['crs']}")
+        if not other["transform"].almost_equals(reference["transform"], precision=1e-6):
+            problems.append("affine transform differs")
+        if problems:
+            raise ValueError(
+                f"{label} raster {Path(path).name} is not on the SAR grid of {Path(sar_path).name}: "
+                + "; ".join(problems)
+                + ". Re-run with align_to_reference_grid: true (CLI --align-to-reference-grid) to reproject it onto the SAR grid."
+            )
 
 
 def _process_tiff(image_id: str,
@@ -267,16 +381,11 @@ def _process_tiff(image_id: str,
         _, height, width = image.shape
         # given the possible resize, both transform and dimensions need to be updated
         transform = dataset.transform * dataset.transform.scale(dataset.width / width, dataset.height / height)
-        profile: dict = dataset.profile.copy()
-        # Some source rasters contain block size metadata without tiled output enabled.
-        # Rasterio/GDAL rejects that combination when creating in-memory GeoTIFFs.
-        if not profile.get("tiled", False):
-            profile.pop("blockxsize", None)
-            profile.pop("blockysize", None)
+        image = _prepare_source_array(image, image_type, dataset.nodata)
         # Transform the image to extract the number of channels, which can change after processing.
         processed_img = process_fn(image)
-        channels = processed_img.shape[0]
-        profile.update(height=height, width=width, count=channels, driver="GTiff")
+        # Output dtype/nodata follow the processed array: float32 + NaN for SAR/DEM, uint8 + 255 for masks.
+        profile = _output_profile_for(dataset.profile, processed_img, image_type)
         # create and open an in-memory file to store results
         # during preprocessing
         with MemoryFile() as memfile:
@@ -303,25 +412,41 @@ def _read_reprojected_to_reference(source_path: Path,
                                    reference_transform,
                                    reference_crs,
                                    resampling: Resampling,
-                                   scale: float = 1.0) -> tuple[np.ndarray, dict]:
+                                   scale: float = 1.0,
+                                   is_mask: bool = False) -> tuple[np.ndarray, dict]:
     """Read a raster on the SAR reference grid, optionally with scaled output."""
     out_height = int(reference_profile["height"] * scale)
     out_width = int(reference_profile["width"] * scale)
     out_transform = reference_transform * reference_transform.scale(reference_profile["width"] / out_width,
                                                                     reference_profile["height"] / out_height)
     with rasterio.open(str(source_path), mode="r", driver="GTiff") as src:
-        destination = np.zeros((src.count, out_height, out_width), dtype=src.dtypes[0])
+        # Areas outside the source coverage must become no-data, never a real value:
+        # 255 (ignore) for masks and NaN for continuous rasters. A 0 fill would
+        # otherwise turn uncovered mask areas into "background" labels.
+        if is_mask:
+            destination = np.full((src.count, out_height, out_width), 255, dtype=np.uint8)
+            dst_nodata = 255
+        else:
+            destination = np.full((src.count, out_height, out_width), np.nan, dtype=np.float32)
+            dst_nodata = np.nan
         for band_idx in range(1, src.count + 1):
+            band = src.read(band_idx)
+            if is_mask:
+                band = band.astype(np.uint8, copy=False) if band.dtype != np.uint8 else band
+                src_nodata = src.nodata if src.nodata is not None else 255
+            else:
+                band = _prepare_source_array(band[None], ImageType.SAR, src.nodata)[0]
+                src_nodata = np.nan
             reproject(
-                source=rasterio.band(src, band_idx),
+                source=band,
                 destination=destination[band_idx - 1],
                 src_transform=src.transform,
                 src_crs=src.crs,
                 dst_transform=out_transform,
                 dst_crs=reference_crs,
                 resampling=resampling,
-                src_nodata=src.nodata,
-                dst_nodata=src.nodata if src.nodata is not None else 0,
+                src_nodata=src_nodata,
+                dst_nodata=dst_nodata,
             )
         profile = src.profile.copy()
     profile.update(height=out_height, width=out_width, transform=out_transform, crs=reference_crs, count=destination.shape[0], driver="GTiff")
@@ -347,11 +472,7 @@ def _write_tiled_array(image_id: str,
     root_dir = Path(dst_path) / group / ctx_dir
     check_or_make_dir(root_dir)
     processed_img = process_fn(array)
-    profile = profile.copy()
-    profile.update(height=processed_img.shape[1], width=processed_img.shape[2], count=processed_img.shape[0], driver="GTiff")
-    if not profile.get("tiled", False):
-        profile.pop("blockxsize", None)
-        profile.pop("blockysize", None)
+    profile = _output_profile_for(profile, processed_img, image_type)
     tile_row = tile_col = 0
     with MemoryFile() as memfile:
         with memfile.open(**profile) as processed:
@@ -382,6 +503,7 @@ def _process_aligned_triplet(image_id: str,
         reference_crs = sar_src.crs
         out_shape = (sar_src.count, int(sar_src.height * scale), int(sar_src.width * scale))
         sar_array = sar_src.read(out_shape=out_shape, resampling=Resampling.bilinear)
+        sar_array = _prepare_source_array(sar_array, ImageType.SAR, sar_src.nodata)
         sar_transform = reference_transform * reference_transform.scale(sar_src.width / out_shape[2], sar_src.height / out_shape[1])
         sar_profile = reference_profile.copy()
         sar_profile.update(height=out_shape[1], width=out_shape[2], transform=sar_transform, count=sar_array.shape[0], driver="GTiff")
@@ -389,7 +511,7 @@ def _process_aligned_triplet(image_id: str,
             sar_profile.pop("blockxsize", None)
             sar_profile.pop("blockysize", None)
     dem_array, dem_profile = _read_reprojected_to_reference(dem_path, reference_profile, reference_transform, reference_crs, Resampling.bilinear, scale=scale)
-    mask_array, mask_profile = _read_reprojected_to_reference(mask_path, reference_profile, reference_transform, reference_crs, Resampling.nearest, scale=scale)
+    mask_array, mask_profile = _read_reprojected_to_reference(mask_path, reference_profile, reference_transform, reference_crs, Resampling.nearest, scale=scale, is_mask=True)
     sar_tiles = _write_tiled_array(image_id, sar_array, sar_profile, subset_dir, ImageType.SAR, tiling_fn, process_fn=sar_process, name_suffix=name_suffix)
     dem_tiles = _write_tiled_array(image_id, dem_array, dem_profile, subset_dir, ImageType.DEM, tiling_fn, process_fn=dem_process, name_suffix=name_suffix)
     mask_tiles = _write_tiled_array(image_id, mask_array, mask_profile, subset_dir, ImageType.MASK, tiling_fn, process_fn=mask_process, name_suffix=name_suffix)
@@ -425,8 +547,18 @@ def _write_preprocessing_manifest(config: PreparationConfig,
         "scale": [int(v) for v in config.scale],
         "tiling": bool(config.tiling),
         "sar_transform": str(getattr(config, "sar_transform", "db10")),
+        "sar_units": {"db10": "dB (10*log10 linear)", "log1p": "log10(1 + linear)", "linear": "linear"}.get(
+            str(getattr(config, "sar_transform", "db10")), str(getattr(config, "sar_transform", "db10"))),
+        "nodata": {
+            "sar": "NaN (source no-data, non-finite or non-positive linear backscatter)",
+            "dem": f"NaN (source no-data, non-finite, or outside [{DEM_VALID_MIN}, {DEM_VALID_MAX}] m)",
+            "mask": 255,
+            "mask_ignores_sar_nodata": True,
+        },
+        "nodata_schema_version": 2,
         "clip_dem": bool(config.clip_dem),
         "morphology": bool(config.morphology),
+        "morphology_splits": sorted({str(s).lower() for s in (getattr(config, "morphology_splits", None) or ["train"])}),
         "morph_kernel": int(config.morph_kernel),
         "nan_threshold": float(config.nan_threshold),
         "mask_mapping": {
@@ -474,6 +606,7 @@ def preprocess_data(config: PreparationConfig):
         is_test_set = subset == "test"
 
         if config.tiling:
+            _prepare_subset_output(subset_dir, overwrite=bool(getattr(config, "overwrite_existing", False)))
             # Find images and sanity checks
             LOG.info("Processing split=%s", subset)
             sar_files, dem_files, msk_files = _gather_files(sar_glob=config.data_source / "*" / "s1_raw" / "*.tif",
@@ -495,13 +628,18 @@ def preprocess_data(config: PreparationConfig):
                 tiler = SingleImageTiler(tile_size=config.tile_size, channels_first=True)
             LOG.info("Tiling strategy: %s", type(tiler).__name__)
             sar_process = _build_sar_transform(config)
-            dem_process = _clip_dem if config.clip_dem else None
+            dem_process = _clip_dem if config.clip_dem else _dem_nodata_to_nan
+            # Morphological clean-up is a training-label choice. Validation and test
+            # masks are kept as published so reported metrics use the official labels.
+            morphology_splits = {str(s).lower() for s in (getattr(config, "morphology_splits", None) or ["train"])}
+            apply_morphology = bool(config.morphology) and subset in morphology_splits
+            LOG.info("Mask morphology for split=%s: %s", subset, "enabled" if apply_morphology else "disabled")
             mask_preprocessor = MaskPreprocessor(kernel_size=config.morph_kernel,
                                                  channels_first=True,
                                                  flood_values=config.mask_flood_values,
                                                  background_values=config.mask_background_values,
                                                  ignore_values=config.mask_ignore_values,
-                                                 apply_morphology=config.morphology,
+                                                 apply_morphology=apply_morphology,
                                                  preserve_ignore=config.preserve_mask_ignore)
             # iterate over the different required scales
             # values are reversed: a scale factor of 2 (x2) means a tile 1024x1024
@@ -519,6 +657,7 @@ def preprocess_data(config: PreparationConfig):
                             sar_process=sar_process, dem_process=dem_process, mask_process=mask_preprocessor,
                             scale=image_scale, name_suffix=name_suffix)
                     else:
+                        _check_same_grid(Path(sar_path), Path(dem_path), Path(msk_path))
                         dem_tiles = _process_tiff(image_id,
                                                   dem_path,
                                                   subset_dir,
@@ -587,31 +726,32 @@ def preprocess_data(config: PreparationConfig):
         tile_paths = _gather_files(sar_glob=subset_dir / "sar" / "*.tif",
                                    dem_glob=subset_dir / "dem" / "*.tif",
                                    mask_glob=subset_dir / "mask" / "*.tif",
-                                   check_stems=False)
+                                   check_stems=True)
 
         valid, removed = 0, 0
-        tile_area = config.tile_size * config.tile_size
 
         for sar_path, dem_path, msk_path in progress_iter(list(zip(*tile_paths))):
             image = imread(sar_path)
             is_context = Path(sar_path).stem.endswith("_full")
-            # remove mostly nan images, using the configured percentage (excluding test images)
-            # tile files are directly deleted, careful about this
-            nan_mask = np.isnan(image.sum(axis=0))
+            # SAR no-data (outside swath, or non-positive linear backscatter) is NaN after
+            # preprocessing. Mostly-empty training/validation tiles are removed; test scenes are kept whole.
+            nan_mask = ~np.isfinite(image).all(axis=0)
             empty_pixels = np.count_nonzero(nan_mask)
-            if not (is_test_set or is_context) and (empty_pixels / float(tile_area)) >= config.nan_threshold:
+            tile_pixels = float(nan_mask.size)
+            if not (is_test_set or is_context) and (empty_pixels / tile_pixels) >= config.nan_threshold:
                 _delete_group(sar_path, dem_path, msk_path)
                 removed += 1
-            # otherwise update nans into an actual ignore index
-            # for sar and dem is not important, but the mask should be 255 for losses
             else:
+                # SAR/DEM keep NaN as their declared no-data value; only the label is
+                # changed so losses and metrics ignore pixels without SAR data.
+                # DEM voids stay NaN in the DEM tile and are ignored by the data loader
+                # only when the DEM channel is actually used.
                 if empty_pixels > 0:
-                    mask_raster(sar_path, mask=nan_mask, mask_value=ImageType.SAR.value[-1])
-                    mask_raster(dem_path, mask=nan_mask, mask_value=ImageType.DEM.value[-1])
                     mask_raster(msk_path, mask=nan_mask, mask_value=ImageType.MASK.value[-1])
                 valid += 1
 
-        LOG.info("Tile validation: kept=%d | removed=%d | kept_percent=%.2f%%", valid, removed, valid / float(valid + removed) * 100.0)
+        kept_percent = valid / float(valid + removed) * 100.0 if (valid + removed) else 0.0
+        LOG.info("Tile validation: kept=%d | removed=%d | kept_percent=%.2f%%", valid, removed, kept_percent)
         tile_counts_by_split[subset] = {
             "sar": _file_count(subset_dir / "sar"),
             "dem": _file_count(subset_dir / "dem"),
@@ -625,7 +765,13 @@ def preprocess_data(config: PreparationConfig):
 
 
 def compute_statistics(config: StatsConfig):
-    """Compute channel statistics for the configured processed-data subset."""
+    """Log channel statistics of processed tiles for one split.
+
+    Values are read exactly as stored (already in the preprocessing units, e.g. dB),
+    so no transform is re-applied. Only finite pixels whose label is not 255 are
+    counted, and mean/std are global over all counted pixels. Training uses
+    ``floodmap fit-normalization``; this command is a diagnostic summary.
+    """
     LOG.info("Computing dataset statistics on split=%s", config.subset)
     print_config(LOG, config)
 
@@ -641,89 +787,75 @@ def compute_statistics(config: StatsConfig):
             f"Processed tile count mismatch: SAR={len(sar_paths)}, DEM={len(dem_paths)}, mask={len(msk_paths)}"
         )
 
-    pixel_count = 0
-    ch_max = None
-    ch_min = None
-    ch_avg = None
-    ch_std = None
-    # First pass: accumulate channel extrema and means.
-    LOG.info("Computing channel minima, maxima, and means")
+    count = total = total_sq = ch_min = ch_max = None
     for sar_path, dem_path, mask_path in progress_iter(list(zip(sar_paths, dem_paths, msk_paths))):
-        image_id = Path(sar_path).stem
-        if not (_extract_emsr(sar_path) == _extract_emsr(dem_path) == _extract_emsr(mask_path)):
-            raise ValueError(
-                f"Image ID mismatch: SAR={sar_path}, DEM={dem_path}, mask={mask_path}"
-            )
-
-        # Read aligned SAR, DEM, and mask rasters.
-        sar = _sar_db10(imread(sar_path, channels_first=False))
-        dem = _clip_dem(imread(dem_path, channels_first=False))
+        stems = {Path(sar_path).stem, Path(dem_path).stem, Path(mask_path).stem}
+        if len(stems) != 1:
+            raise ValueError(f"Tile stem mismatch: SAR={sar_path}, DEM={dem_path}, mask={mask_path}")
+        sar = imread(sar_path, channels_first=False).astype(np.float64)
+        dem = imread(dem_path, channels_first=False).astype(np.float64)
         mask = imread(mask_path, channels_first=False)
         mask = mask.reshape(_dims(mask))
         if not (_dims(sar) == _dims(dem) == _dims(mask)):
             raise ValueError(
-                f"Raster shape mismatch for {image_id}: "
+                f"Raster shape mismatch for {Path(sar_path).stem}: "
                 f"SAR={_dims(sar)}, DEM={_dims(dem)}, mask={_dims(mask)}"
             )
+        values = np.concatenate((sar, dem), axis=-1).reshape(-1, sar.shape[-1] + dem.shape[-1])
+        labelled = (mask.reshape(-1) != 255)[:, None]
+        valid = np.isfinite(values) & labelled
+        if count is None:
+            channels = values.shape[-1]
+            count = np.zeros(channels, dtype=np.int64)
+            total = np.zeros(channels, dtype=np.float64)
+            total_sq = np.zeros(channels, dtype=np.float64)
+            ch_min = np.full(channels, np.inf)
+            ch_max = np.full(channels, -np.inf)
+        safe = np.where(valid, values, 0.0)
+        count += valid.sum(axis=0)
+        total += safe.sum(axis=0)
+        total_sq += (safe ** 2).sum(axis=0)
+        ch_min = np.minimum(ch_min, np.where(valid, values, np.inf).min(axis=0))
+        ch_max = np.maximum(ch_max, np.where(valid, values, -np.inf).max(axis=0))
 
-        # Initialise channel accumulators from the first valid triplet.
-        channel_count = sar.shape[-1] + dem.shape[-1]
-        if ch_max is None:
-            ch_max = np.ones(channel_count) * np.finfo(np.float32).min
-            ch_min = np.ones(channel_count) * np.finfo(np.float32).max
-            ch_avg = np.zeros(channel_count, dtype=np.float32)
-            ch_std = np.zeros(channel_count, dtype=np.float32)
-
-        valid_pixels = mask.flatten() != 255
-        sar = sar.reshape((-1, sar.shape[-1]))[valid_pixels]
-        dem = dem.reshape((-1, dem.shape[-1]))[valid_pixels]
-
-        pixel_count += sar.shape[0]
-        ch_max = np.maximum(ch_max, np.concatenate((sar.max(axis=0), dem.max(axis=0)), axis=-1))
-        ch_min = np.minimum(ch_min, np.concatenate((sar.min(axis=0), dem.min(axis=0)), axis=-1))
-        ch_avg += np.concatenate((sar.sum(axis=0), dem.sum(axis=0)), axis=-1)
-    ch_avg /= float(pixel_count)
-
-    # Use a second pass so the standard deviation is computed from the fitted means.
-    LOG.info("Computing channel standard deviations")
-    for sar_path, dem_path, mask_path in progress_iter(list(zip(sar_paths, dem_paths, msk_paths))):
-        image_id = Path(sar_path).stem
-        # Read aligned SAR, DEM, and mask rasters.
-        sar = _sar_db10(imread(sar_path, channels_first=False))
-        dem = _clip_dem(imread(dem_path, channels_first=False))
-        mask = imread(mask_path, channels_first=False)
-        mask = mask.reshape(_dims(mask))
-        if not (_dims(sar) == _dims(dem) == _dims(mask)):
-            raise ValueError(
-                f"Raster shape mismatch for {image_id}: "
-                f"SAR={_dims(sar)}, DEM={_dims(dem)}, mask={_dims(mask)}"
-            )
-        # Flatten spatial dimensions while preserving channels.
-        img_channels = sar.shape[-1]
-        dem_channels = dem.shape[-1]
-        valid_pixels = mask.flatten() != 255
-        sar = sar.reshape((-1, img_channels))[valid_pixels]
-        dem = dem.reshape((-1, dem_channels))[valid_pixels]
-        # Accumulate per-channel variance terms.
-        image_std = ((sar - ch_avg[:img_channels])**2).sum(axis=0) / float(sar.shape[0])
-        dem_std = ((dem - ch_avg[img_channels:])**2).sum(axis=0) / float(sar.shape[0])
-        ch_std += np.concatenate((image_std, dem_std), axis=-1)
-    # Convert the accumulated variance to standard deviation.
-    ch_std = np.sqrt(ch_std / len(sar_paths))
+    denom = np.maximum(count, 1)
+    ch_avg = total / denom
+    ch_std = np.sqrt(np.maximum(total_sq / denom - ch_avg ** 2, 0.0))
+    LOG.info("Valid pixels per channel: %s", count)
     LOG.info("Channel-wise max: %s", ch_max)
     LOG.info("Channel-wise min: %s", ch_min)
     LOG.info("Channel-wise mean: %s", ch_avg)
     LOG.info("Channel-wise standard deviation: %s", ch_std)
-    LOG.info("Normalised mean: %s", (ch_avg - ch_min) / (ch_max - ch_min))
-    LOG.info("Normalised standard deviation: %s", ch_std / (ch_max - ch_min))
+
+
+def _processed_sar_to_linear(values: np.ndarray, sar_transform: str) -> np.ndarray:
+    """Invert the preprocessing SAR transform back to linear backscatter."""
+    mode = str(sar_transform or "db10").lower()
+    values = np.asarray(values, dtype=np.float32)
+    if mode == "db10":
+        return np.power(10.0, values / 10.0).astype(np.float32)
+    if mode == "log1p":
+        return (np.power(10.0, values) - 1.0).astype(np.float32)
+    return values
 
 
 def generate_pseudolabels(config: PreparationConfig):
-    """Generate training pseudo-label weight rasters from SAR thresholds."""
+    """Generate training pseudo-label weight rasters from SAR thresholds.
+
+    Output values: 0 = background, 1 = only one of threshold/label says flood,
+    2 = threshold and label agree on flood, 255 = ignore (label ignore or no SAR data).
+    """
     LOG.info("Generating pseudo-label weight rasters")
     data_path = Path(config.data_processed)
     if not data_path.exists() or not data_path.is_dir():
         raise FileNotFoundError(f"Processed data directory not found: {data_path}")
+    manifest_path = data_path / "preprocessing_manifest.json"
+    sar_transform = "log1p"
+    if manifest_path.exists():
+        sar_transform = json.loads(manifest_path.read_text(encoding="utf-8")).get("sar_transform", sar_transform)
+    else:
+        LOG.warning("preprocessing_manifest.json not found; assuming log1p SAR tiles for pseudo-labelling.")
+    LOG.info("Pseudo-label thresholds are applied to linear backscatter (source tiles: %s)", sar_transform)
 
     # Pseudo-label weights are generated only for the training split.
     dataset = FloodDataset(path=data_path,
@@ -735,23 +867,34 @@ def generate_pseudolabels(config: PreparationConfig):
     check_or_make_dir(result_path)
     morph_kernel = MorphologyTransform().create_round_kernel(kernel_size=config.morph_kernel)
 
+    def _denoise(image: np.ndarray) -> np.ndarray:
+        try:
+            return denoise_nl_means(image, h=0.1, channel_axis=-1)
+        except TypeError:  # scikit-image < 0.19
+            return denoise_nl_means(image, h=0.1, multichannel=True)
+
     # Use indexed processing so output filenames remain aligned with source tiles.
     def process_image(index: int):
-        image = imread(dataset.image_files[index], channels_first=False)
+        image = imread(dataset.image_files[index], channels_first=False).astype(np.float32)
         label, profile = imread(dataset.label_files[index], return_metadata=True)
         label = label.squeeze(0).astype(np.uint8)
+        invalid = ~np.isfinite(image).all(axis=-1)
+        image = _processed_sar_to_linear(np.nan_to_num(image, nan=0.0), sar_transform)
         # Scale VV and VH before threshold-based pseudo-label generation.
         image[:, :, 0] *= config.vv_multiplier
         image[:, :, 1] *= config.vh_multiplier
         # Denoise SAR inputs and clean the binary mask with morphological opening.
-        denoised = denoise_nl_means(image, h=0.1, multichannel=True)
+        denoised = _denoise(image)
         flooded = ((denoised[:, :, 0] <= 0.1) * (denoised[:, :, 1] <= 0.1)).astype(np.uint8)
         flooded = cv2.morphologyEx(flooded, cv2.MORPH_OPEN, morph_kernel)
-        # Encode background as 0, threshold union as 1, and threshold/label intersection as 2.
-        result = flooded + label
+        # 0 = background, 1 = one source says flood, 2 = both agree; ignore stays 255.
+        result = (flooded.astype(np.int16) + np.where(label == 1, 1, 0)).astype(np.uint8)
+        result[(label == 255) | invalid] = 255
         # Preserve source georeferencing in the generated weight raster.
         image_name = Path(dataset.image_files[index]).name
-        with rasterio.open(str(result_path / image_name), "w", **profile) as dst:
+        out_profile = dict(profile)
+        out_profile.update(dtype="uint8", nodata=255, count=1)
+        with rasterio.open(str(result_path / image_name), "w", **out_profile) as dst:
             dst.write(result[np.newaxis, ...])
 
     # Process tiles in parallel while preserving deterministic output names.

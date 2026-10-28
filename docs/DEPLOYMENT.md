@@ -6,9 +6,15 @@ Before the first deployment in a newly installed runtime, verify the binary stac
 floodmap doctor --strict
 ```
 
-VV/VH configuration loading and prediction no longer import SciPy merely to validate modality names. SciPy is loaded only when an operation actually calculates the `dem_tpi` derived feature.
+VV/VH configuration loading and prediction do not import SciPy. SciPy is loaded only when an operation calculates the `dem_tpi` derived feature.
 
 The deployment commands expect analysis-ready SAR/DEM rasters. They do not run low-level Sentinel-1 SAFE preprocessing such as orbit correction, radiometric calibration or terrain correction.
+
+## Input units and no-data
+
+Upload VV/VH backscatter as **linear power** (σ⁰ or γ⁰, e.g. Sentinel-1 RTC/GRD products) or in **dB**. `predict-scene --input-sar-units auto` (the default; the Streamlit app has the same selector) detects which one it is and converts it to the units the model was trained on, which `export-deployment` records as `inputs.sar_units` in the manifest (`db10` for models trained on dB tiles; a manifest without the field is read as `log10(1 + linear)`). Use `--input-sar-units linear` or `db` when the detection cannot decide.
+
+Pixels with no SAR data (0, NaN or the raster's nodata value) and DEM voids are not predicted. They are written as `255` (declared nodata) in the flood mask and as NaN in the probability raster, and they are excluded from flood area, flood fraction and labelled-scene metrics. Two-band files are read as band 1 = VV, band 2 = VH unless the band descriptions say VH, VV.
 
 ## Export a portable deployment bundle
 

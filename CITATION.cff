@@ -5,8 +5,8 @@ type: software
 authors:
   - family-names: "Edeh"
     given-names: "Rollins"
-version: "0.15.20"
-date-released: "2026-08-12"
+version: "1.0.0"
+date-released: "2026-10-27"
 license: MIT
 keywords:
   - flood mapping

@@ -42,7 +42,7 @@ The command writes:
 ```bash
 floodmap audit-feature-separability \
   --processed-data-dir "$PROCESSED_DIR" \
-  --output-dir "$ARTIFACTS_DIR/derived_feature_audit_v088" \
+  --output-dir "$ARTIFACTS_DIR/derived_feature_audit" \
   --fit-split train \
   --eval-split val \
   --base-modalities vv vh dem \
@@ -62,7 +62,7 @@ Use the retained baseline normalization JSON as the preservation source. VV, VH,
 ```bash
 floodmap fit-normalization \
   --processed-data-dir "$PROCESSED_DIR" \
-  --output-file "$ARTIFACTS_DIR/normalization_six_channel_v088.json" \
+  --output-file "$ARTIFACTS_DIR/normalization_six_channel.json" \
   --split train \
   --input-modalities vv vh dem vv_vh_log_ratio dem_slope dem_tpi \
   --preserve-channel-stats-from "$BASELINE_STATS" \
@@ -79,9 +79,9 @@ floodmap fit-normalization \
 floodmap prepare-derived-experiment \
   --base-config "$BASELINE_CONFIG" \
   --baseline-checkpoint "$BASELINE_CHECKPOINT" \
-  --normalization-stats-path "$ARTIFACTS_DIR/normalization_six_channel_v088.json" \
-  --output-config "$ARTIFACTS_DIR/configs/flood_resnet50_six_channel_v088.yaml" \
-  --run-id flood_resnet50_six_channel_v088 \
+  --normalization-stats-path "$ARTIFACTS_DIR/normalization_six_channel.json" \
+  --output-config "$ARTIFACTS_DIR/configs/flood_resnet50_six_channel.yaml" \
+  --run-id flood_resnet50_six_channel \
   --artifacts-dir "$ARTIFACTS_DIR" \
   --batch-size 4 \
   --epochs 20 \
@@ -98,10 +98,10 @@ The command clears specialist samplers/crops, uses geometric augmentation, disab
 
 ```bash
 floodmap train \
-  --config "$ARTIFACTS_DIR/configs/flood_resnet50_six_channel_v088.yaml" \
+  --config "$ARTIFACTS_DIR/configs/flood_resnet50_six_channel.yaml" \
   --processed-data-dir "$PROCESSED_DIR" \
   --artifacts-dir "$ARTIFACTS_DIR" \
-  --run-id flood_resnet50_six_channel_v088 \
+  --run-id flood_resnet50_six_channel \
   --no-resume \
   --no-pretrained \
   --no-amp \

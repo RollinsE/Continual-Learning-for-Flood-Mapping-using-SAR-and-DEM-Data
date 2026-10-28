@@ -14,7 +14,7 @@ def test_streamlit_entrypoint_is_present_and_uses_core_deployment_engine():
 
 def test_streamlit_dependencies_are_separate_from_training_requirements():
     requirements = Path('streamlit_app/requirements.txt').read_text(encoding='utf-8')
-    assert 'streamlit==1.60.0' in requirements
+    assert 'streamlit==1.62.0' in requirements
     assert 'albumentations' not in requirements
     assert 'scipy' not in requirements
     assert 'planetary-computer' not in requirements

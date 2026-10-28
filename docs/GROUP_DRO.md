@@ -41,7 +41,7 @@ floodmap train \
   --config "<baseline-run>/config.yaml" \
   --processed-data-dir "<processed-dir>" \
   --artifacts-dir "<artifacts-dir>" \
-  --run-id groupdro_amp_recovery_v094 \
+  --run-id groupdro_amp_recovery \
   --init-checkpoint "<baseline-checkpoint.pth>" \
   --group-dro \
   --group-dro-eta 0.01 \

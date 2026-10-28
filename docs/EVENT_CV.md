@@ -149,7 +149,7 @@ floodmap event-cv \
   --log-file $RUNS_DIR/event_cv_terramind_tiny_dem/output.log
 ```
 
-Re-running the same command skips only folds with a validated successful `cv_result.json` completion marker and resumes an interrupted fold from its own `models/last.ckpt`. An interruption stops the matrix immediately and does not create a completion marker. Compatibility handling also detects and repairs stale interrupted markers written by older releases. The output directory is protected against changes to the fold or normalisation plan.
+Re-running the same command skips only folds with a validated successful `cv_result.json` completion marker and resumes an interrupted fold from its own `models/last.ckpt`. An interruption stops the matrix immediately and does not create a completion marker. Markers left by an interrupted run are detected and repaired. The output directory is protected against changes to the fold or normalisation plan.
 
 The learning-rate, optimiser, scheduler and loss overrides are applied identically to every selected fold. Provider-specific input normalisation and provider-safe augmentation remain registry-controlled.
 

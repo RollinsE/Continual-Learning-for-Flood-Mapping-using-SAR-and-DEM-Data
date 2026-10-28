@@ -20,7 +20,8 @@ from floods.hard_negative_regions import AuditGuidedHardNegativeCropSupervision
 from floods.hard_positive_regions import AuditGuidedHardPositiveCropSupervision
 from floods.normalization import describe_stats, load_normalization_stats
 from floods.modalities import has_derived_modalities, resolve_input_modalities
-from floods.transforms import ClipNormalize, Denormalize, RobustMinMaxNormalize, ProviderSARNormalize
+from floods.transforms import (ClipNormalize, Denormalize, PhysicalGaussianBlur, ProviderSARNormalize, RandomChoice,
+                               RobustMinMaxNormalize, SARRadiometricJitter)
 from floods.hard_examples import selected_hard_example_indices
 from floods.utils.common import get_logger
 from floods.utils.tiling.functional import entropy_weights, foreground_ratios_from_labels, mask_body_ratio_from_threshold
@@ -82,6 +83,11 @@ def _grid_distortion_composite(p: float = 0.2):
 
 
 def _rotate_composite(p: float = 0.5):
+    """Rotation whose empty corners are ignored in the loss.
+
+    The image corners are filled with NaN-free 0 but the mask corners with 255,
+    so the artificial border never becomes a "background" training label.
+    """
     params = inspect.signature(alb.Rotate).parameters
     kwargs = {"limit": 30, "p": p}
     if "border_mode" in params:
@@ -90,20 +96,37 @@ def _rotate_composite(p: float = 0.5):
         kwargs["interpolation"] = 1
     if "mask_interpolation" in params:
         kwargs["mask_interpolation"] = 0
+    if "fill_mask" in params:  # Albumentations >= 2
+        kwargs["fill_mask"] = 255
+        if "fill" in params:
+            kwargs["fill"] = 0
+    elif "mask_value" in params:  # Albumentations 1.x
+        kwargs["mask_value"] = 255
+        if "value" in params:
+            kwargs["value"] = 0
     return alb.Rotate(**kwargs)
 
 
-def _composite_pixel_transforms():
-    """Composite pixel-level augmentations applied to the stacked image."""
-    options = [
-        alb.GaussianBlur(blur_limit=(3, 7), p=0.5),
-        alb.RandomBrightnessContrast(p=0.2),
-    ]
+def _coarse_dropout_ignored(p: float = 1.0):
+    """Cut-out holes whose labels are set to ignore (255)."""
     try:
-        options.append(alb.CoarseDropout(num_holes_range=(1, 8), hole_height_range=(0.1, 0.25), hole_width_range=(0.1, 0.25), p=1.0))
+        return alb.CoarseDropout(num_holes_range=(1, 8), hole_height_range=(0.1, 0.25),
+                                 hole_width_range=(0.1, 0.25), fill=0, fill_mask=255, p=p)
     except (TypeError, ValueError):
-        options.append(alb.CoarseDropout(max_holes=8, max_height=64, max_width=64, p=1.0))
-    return alb.OneOf(options, p=0.5)
+        return alb.CoarseDropout(max_holes=8, max_height=64, max_width=64, fill_value=0, mask_fill_value=255, p=p)
+
+
+def _composite_pixel_transforms():
+    """Composite pixel-level augmentations applied to the stacked image.
+
+    Photometric changes are not applied here: the stacked image holds physical
+    units (dB, metres), and Albumentations brightness/contrast and blur clip float
+    images to [0, 1]. SAR radiometric variation is handled by ``SARRadiometricJitter``.
+    """
+    # Same mixture weights as the previous alb.OneOf([blur p=0.5, dropout p=1.0], p=0.5).
+    # PhysicalGaussianBlur replaces alb.GaussianBlur, which clips float images to [0, 1].
+    return RandomChoice([PhysicalGaussianBlur(blur_limit=(3, 7), p=1.0), _coarse_dropout_ignored(p=1.0)],
+                        weights=[0.5, 1.0], p=0.5)
 
 
 def _normalise_augmentation_profile(profile: str) -> str:
@@ -112,7 +135,7 @@ def _normalise_augmentation_profile(profile: str) -> str:
         "light": "geometric",
         "heavy": "deformation",
         "full_deformation": "deformation",
-        "note" + "book": "composite",
+        "notebook": "composite",
         "safe": "geometric",
         "sar_safe": "sar_radiometric",
         "risky": "deformation",
@@ -203,17 +226,19 @@ def train_transforms_base(image_size: int,
     return CallableCompose(transforms)
 
 
-def train_transforms_sar(augmentation_profile: str = "standard", disable_sar_noise: bool = False):
+def train_transforms_sar(augmentation_profile: str = "standard",
+                         disable_sar_noise: bool = False,
+                         source_sar_transform: str = "db10"):
+    """SAR-only radiometric augmentation, applied in dB space whatever the tile units.
+
+    Calibration offsets and speckle are additive in dB. Albumentations'
+    MultiplicativeNoise/RandomBrightnessContrast are not used because they assume
+    [0, 1] images and clip float outputs to that range.
+    """
     profile = _normalise_augmentation_profile(augmentation_profile)
-    if disable_sar_noise or profile in {"none", "geometric", "deformation", "composite"}:
-        return alb.Compose([])
-    transforms = [
-        alb.OneOf([
-            alb.GaussianBlur(blur_limit=(3, 7), p=0.5),
-            alb.MultiplicativeNoise(multiplier=(0.85, 1.15), elementwise=True, per_channel=True, p=0.5),
-        ], p=0.5)
-    ]
-    return alb.Compose(transforms)
+    if disable_sar_noise or profile in {"none", "geometric"}:
+        return CallableCompose([])
+    return CallableCompose([SARRadiometricJitter(source_sar_transform=source_sar_transform, p=0.5)])
 
 
 def train_transforms_dem(channel_dropout: float = 0.0):
@@ -238,9 +263,8 @@ def _resolve_source_sar_transform(data_root: Path, configured: str = "auto") -> 
         if manifest_value in {"linear", "log1p", "db10"}:
             LOG.info("Provider normalization detected processed SAR transform from manifest: %s", manifest_value)
             return manifest_value
-    # Older processed datasets predate the manifest. Their positive, compressed SAR
-    # tiles came from the project's log1p preprocessing path. Make the fallback
-    # explicit in the log rather than silently treating them as dB values.
+    # Without a recognised manifest entry, assume log1p tiles and say so in the log
+    # rather than silently treating them as dB values.
     LOG.warning(
         "preprocessing_manifest.json is missing or has no recognised sar_transform; "
         "assuming source_sar_transform=log1p. Pass --source-sar-transform explicitly to override."
@@ -277,7 +301,7 @@ def eval_transforms(mean: tuple,
                     clip_max: tuple,
                     normalization_mode: str = "stats") -> alb.Compose:
     mode = str(normalization_mode or "stats").lower()
-    if mode in {"robust_percentile", "note" + "book_robust", "robust_minmax"}:
+    if mode in {"robust_percentile", "notebook_robust", "robust_minmax"}:
         norm = RobustMinMaxNormalize(mean=mean, std=std, clip_min=clip_min, clip_max=clip_max)
     else:
         norm = ClipNormalize(mean=mean, std=std, clip_min=clip_min, clip_max=clip_max)
@@ -315,9 +339,9 @@ def prepare_evaluation_dataset(config: TrainConfig, split: str = "val") -> Tuple
         LOG.info("Using provider normalization: mode=%s | modalities=%s", norm_mode, modalities)
     else:
         stats_candidate = Path(config.data.path) / "normalization_stats.json"
-        if not config.data.normalization_stats_path and stats_candidate.exists() and norm_mode in {"stats", "robust_percentile", "note" + "book_robust", "robust_minmax"}:
+        if not config.data.normalization_stats_path and stats_candidate.exists() and norm_mode in {"stats", "robust_percentile", "notebook_robust", "robust_minmax"}:
             config.data.normalization_stats_path = str(stats_candidate)
-        if norm_mode in {"stats", "robust_percentile", "note" + "book_robust", "robust_minmax"} or getattr(config.data, "normalization_stats_path", None):
+        if norm_mode in {"stats", "robust_percentile", "notebook_robust", "robust_minmax"} or getattr(config.data, "normalization_stats_path", None):
             if not config.data.normalization_stats_path:
                 raise ValueError(f"normalization_mode='{norm_mode}' requires --normalization-stats-path")
             mean, std, clip_min, clip_max = load_normalization_stats(
@@ -404,9 +428,9 @@ def prepare_datasets(config: TrainConfig, use_rgb: bool = False) -> Tuple[Datase
         LOG.info("Using provider normalization: mode=%s | modalities=%s", norm_mode, modalities)
     else:
         stats_candidate = data_root / "normalization_stats.json"
-        if not config.data.normalization_stats_path and stats_candidate.exists() and norm_mode in {"stats", "robust_percentile", "note" + "book_robust", "robust_minmax"}:
+        if not config.data.normalization_stats_path and stats_candidate.exists() and norm_mode in {"stats", "robust_percentile", "notebook_robust", "robust_minmax"}:
             config.data.normalization_stats_path = str(stats_candidate)
-        if norm_mode in {"stats", "robust_percentile", "note" + "book_robust", "robust_minmax"} or config.data.normalization_stats_path:
+        if norm_mode in {"stats", "robust_percentile", "notebook_robust", "robust_minmax"} or config.data.normalization_stats_path:
             if not config.data.normalization_stats_path:
                 raise ValueError(f"normalization_mode='{norm_mode}' requires --normalization-stats-path")
             mean, std, clip_min, clip_max = load_normalization_stats(
@@ -429,8 +453,13 @@ def prepare_datasets(config: TrainConfig, use_rgb: bool = False) -> Tuple[Datase
                                      disable_random_crop=config.data.disable_random_crop,
                                      disable_elastic=config.data.disable_elastic,
                                      disable_grid_distortion=config.data.disable_grid_distortion)
+    sar_units = _resolve_source_sar_transform(data_root, getattr(config.data, "source_sar_transform", "auto"))
+    # Record the resolved SAR units in the run config so deployment bundles know what
+    # representation the model expects (deployment converts uploads to these units).
+    config.data.source_sar_transform = sar_units
     sar_trf = train_transforms_sar(augmentation_profile=config.data.augmentation_profile,
-                                   disable_sar_noise=config.data.disable_sar_noise or derived_active)
+                                   disable_sar_noise=config.data.disable_sar_noise or derived_active,
+                                   source_sar_transform=sar_units)
     dem_trf = train_transforms_dem(channel_dropout=0)
     drop_names = [str(m).lower() for m in getattr(config.data, "drop_modalities", [])]
     modality_dropout_indices = [modalities.index(m) for m in drop_names if m in modalities]
@@ -490,7 +519,7 @@ def prepare_datasets(config: TrainConfig, use_rgb: bool = False) -> Tuple[Datase
              profile,
              (profile == "crop_aware") and not bool(config.data.disable_random_crop),
              (profile in {"deformation"}) and not (bool(config.data.disable_elastic) and bool(config.data.disable_grid_distortion)),
-             (profile in {"sar_radiometric", "standard", "crop_aware", "deformation"}) and not bool(config.data.disable_sar_noise) and not derived_active)
+             (profile in {"sar_radiometric", "standard", "crop_aware", "deformation", "composite"}) and not bool(config.data.disable_sar_noise) and not derived_active)
     if sparse_crop is not None:
         LOG.info(
             "Sparse-flood crop supervision: enabled on flood-containing tiles | "
@@ -552,6 +581,9 @@ def prepare_datasets(config: TrainConfig, use_rgb: bool = False) -> Tuple[Datase
                                 sparse_crop_supervision=sparse_crop,
                                 hard_negative_crop_supervision=hard_negative_crop,
                                 hard_positive_crop_supervision=hard_positive_crop)
+    # Albumentations >= 2 ignores global seeds; seed its private RNGs from the run seed.
+    from floods.utils.ml import reseed_dataset_augmentations
+    reseed_dataset_augmentations(train_dataset, int(getattr(config, "seed", 0) or 0))
     valid_dataset = dataset_cls(path=data_root,
                                 subset=str(getattr(config.data, "val_source_split", "val") or "val"),
                                 include_dem=config.data.include_dem,

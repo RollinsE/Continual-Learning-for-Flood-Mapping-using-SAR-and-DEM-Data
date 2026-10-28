@@ -20,7 +20,7 @@ class FloodDataset(DatasetBase):
     _categories = {0: "background", 1: "flood"}
     _palette = {0: (0, 0, 0), 1: (255, 255, 255), 255: (255, 0, 255)}
     _ignore_index = 255
-    # Legacy channel statistics. Derived-feature runs must use train-fitted stats.
+    # Default VV/VH/DEM statistics for normalization_mode=fixed. Derived-feature runs must use train-fitted stats.
     _mean = (4.9329374e-02, 1.1776519e-02, 1.4241237e+02)
     _std = (3.91287043e-02, 1.03687926e-02, 8.11010422e+01)
 
@@ -145,7 +145,9 @@ class FloodDataset(DatasetBase):
     def _stack_modalities(self, index: int, label: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         sar = imread(self.image_files[index], channels_first=False).astype(np.float32)
         sar = self._channels_last(sar)
-        sar = np.nan_to_num(sar, nan=0.0, posinf=30.0, neginf=-30.0)
+        # No-data stays NaN here: it is turned into ignore labels in __getitem__ and
+        # filled with the normalised mean (0) by the normalisation transform.
+        sar = np.where(np.isfinite(sar), sar, np.nan).astype(np.float32, copy=False)
         if self.transform_sar is not None:
             pair = self.transform_sar(image=sar, mask=label)
             sar = self._channels_last(pair.get("image"))
@@ -155,7 +157,7 @@ class FloodDataset(DatasetBase):
         if self._include_dem:
             dem = imread(self.dem_files[index], channels_first=False).astype(np.float32)
             dem = self._channels_last(dem)
-            dem = np.nan_to_num(dem, nan=0.0, posinf=0.0, neginf=0.0)
+            dem = np.where(np.isfinite(dem), dem, np.nan).astype(np.float32, copy=False)
             if self.transform_dem is not None:
                 pair = self.transform_dem(image=dem, mask=label)
                 dem = self._channels_last(pair.get("image"))
@@ -169,7 +171,7 @@ class FloodDataset(DatasetBase):
                 raise ValueError(
                     f"Derived feature tile {self.derived_files[index]} has {derived.shape[-1]} band(s); expected 3"
                 )
-            derived = np.nan_to_num(derived, nan=0.0, posinf=0.0, neginf=0.0)
+            derived = np.where(np.isfinite(derived), derived, np.nan).astype(np.float32, copy=False)
 
         source = {
             "vv": (sar, 0),
@@ -198,9 +200,33 @@ class FloodDataset(DatasetBase):
             channels.append(channel)
         return np.stack(channels, axis=-1).astype(np.float32, copy=False), label
 
+    @staticmethod
+    def _ignore_missing(image: np.ndarray, label: np.ndarray, ignore_index: int = 255) -> np.ndarray:
+        """Set labels to ignore wherever any active input channel has no data."""
+        image = np.asarray(image)
+        if image.ndim != 3 or label is None:
+            return label
+        missing = ~np.isfinite(image).all(axis=-1)
+        if missing.any():
+            label = np.array(label, copy=True)
+            label[missing] = ignore_index
+        return label
+
+    def reseed_augmentations(self, seed: int) -> None:
+        """Re-seed the private RNGs of Albumentations transforms (>= 2.0).
+
+        Albumentations 2 keeps its own random generators, so ``seed_everything``
+        does not reach them and forked DataLoader workers would otherwise replay
+        identical augmentation sequences. ``seed_worker`` calls this per worker.
+        """
+        from floods.utils.ml import reseed_transform_tree
+        for transform in (self.transform_base, self.transform_sar, self.transform_dem):
+            reseed_transform_tree(transform, seed)
+
     def __getitem__(self, index: int) -> Tuple[Tensor, Tensor]:
         label = imread(self.label_files[index]).squeeze(0).astype(np.uint8)
         image, label = self._stack_modalities(index, label)
+        label = self._ignore_missing(image, label, self._ignore_index)
 
         crop_metadata = None
         if self.hard_positive_crop_supervision is not None:
@@ -218,6 +244,8 @@ class FloodDataset(DatasetBase):
             pair = self.transform_base(image=image, mask=label)
             image = pair.get("image")
             label = pair.get("mask")
+            # Interpolating transforms can spread NaN into neighbouring pixels.
+            label = self._ignore_missing(image, label, self._ignore_index)
         if self.normalization:
             pair = self.normalization(image=image, mask=label)
             image = pair.get("image")

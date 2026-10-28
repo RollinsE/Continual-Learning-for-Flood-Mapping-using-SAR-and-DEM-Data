@@ -323,8 +323,6 @@ class ASPP(nn.Module):
         return x
 
 
-# Backwards-compatible alias for the historical misspelling.
-ASSP = ASPP
 
 
 class Decoder(nn.Module):
@@ -390,8 +388,8 @@ class DeepLab(BaseModel):
             low_level_channels = 128
             backbone_out_channels = 2048
 
-        # Keep the historical attribute name ``ASSP`` so existing checkpoints retain
-        # the same state-dict key prefix; the implementation itself uses the correct ASPP name.
+        # The attribute is named ``ASSP`` so state-dict keys match the MMFlood DeepLabV3+
+        # checkpoints; the module class itself is ASPP.
         self.ASSP = ASPP(in_channels=backbone_out_channels, output_stride=output_stride)
         self.decoder = Decoder(low_level_channels, num_classes)
 

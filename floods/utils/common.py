@@ -47,9 +47,6 @@ def code_revision() -> str:
     return f"release-{__version__}"
 
 
-# Backwards-compatible import for external callers of earlier releases.
-git_revision_hash = code_revision
-
 
 def generate_id() -> str:
     return str(uuid4())

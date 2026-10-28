@@ -65,12 +65,12 @@ class CandidateSpec:
 SOURCES: dict[str, WeightSourceSpec] = {
     "random": WeightSourceSpec(
         name="random", provider="timm", default_encoder=None, default_decoder=None,
-        adapter="timm", normalization_mode="robust_percentile", allowed_modality_sets=(),
+        adapter="timm", normalization_mode="robust_minmax", allowed_modality_sets=(),
         description="Randomly initialised timm encoder.",
     ),
     "imagenet": WeightSourceSpec(
         name="imagenet", provider="timm", default_encoder=None, default_decoder=None,
-        adapter="timm", normalization_mode="robust_percentile", allowed_modality_sets=(),
+        adapter="timm", normalization_mode="robust_minmax", allowed_modality_sets=(),
         description="ImageNet-pretrained timm encoder.",
     ),
     "ssl4eo_s1_moco": WeightSourceSpec(
@@ -100,7 +100,7 @@ SOURCES: dict[str, WeightSourceSpec] = {
     "croma_sar_base": WeightSourceSpec(
         name="croma_sar_base", provider="torchgeo", default_encoder="croma_sar_base",
         default_decoder="segformer", adapter="croma_sar_base",
-        normalization_mode="robust_percentile", allowed_modality_sets=(("vv", "vh"),),
+        normalization_mode="robust_minmax", allowed_modality_sets=(("vv", "vh"),),
         foundation_input_size=120, description="CROMA base SAR encoder.",
     ),
     "terramind_v1_tiny": WeightSourceSpec(
@@ -238,13 +238,13 @@ def resolve_model_spec(
     )
 
 
-def resolve_candidate(candidate: CandidateSpec, modalities: Sequence[str], *, legacy_pretrained: bool | None = None) -> ResolvedModelSpec:
+def resolve_candidate(candidate: CandidateSpec, modalities: Sequence[str], *, default_pretrained: bool | None = None) -> ResolvedModelSpec:
     return resolve_model_spec(
         weights_source=candidate.weights_source,
         modalities=modalities,
         encoder=candidate.encoder,
         decoder=candidate.decoder,
-        pretrained=legacy_pretrained,
+        pretrained=default_pretrained,
         label=candidate.label,
     )
 

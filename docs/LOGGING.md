@@ -26,8 +26,8 @@ pass prints:
 - a completion record;
 - the full epoch metrics and checkpoint/early-stopping decision.
 
-The progress record includes the latest loss and learning rate. It no longer
-prints every 2–3% of a long epoch.
+The progress record includes the latest loss and learning rate and is written at
+the configured interval rather than continuously.
 
 `--dynamic-progress` retains a live carriage-return tqdm bar for a suitable
 interactive terminal.

@@ -5,7 +5,7 @@ configuration, model, loss, normalization and augmentation settings unchanged.
 
 ```bash
 floodmap train \
-  --config $ARTIFACTS_DIR/flood_baseline_512_20260713_194723/config.yaml \
+  --config $ARTIFACTS_DIR/baseline_run/config.yaml \
   --processed-data-dir $PROCESSED_DIR \
   --artifacts-dir $ARTIFACTS_DIR \
   --run-id flood_tempered_sampler_control \

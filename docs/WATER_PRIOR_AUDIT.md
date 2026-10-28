@@ -24,11 +24,11 @@ Example targeted audit:
 
 ```bash
 floodmap audit-water-prior \
-  --config $ARTIFACTS_DIR/flood_baseline_512_20260713_194723/config.yaml \
-  --checkpoint $ARTIFACTS_DIR/flood_baseline_512_20260713_194723/models/model-020_best_f1-0.4941.pth \
+  --config $ARTIFACTS_DIR/baseline_run/config.yaml \
+  --checkpoint $ARTIFACTS_DIR/baseline_run/models/<best-checkpoint>.pth \
   --processed-data-dir $PROCESSED_DIR \
-  --output-dir $ARTIFACTS_DIR/water_prior_audit_EMSR342_v090 \
-  --prior-cache-dir $ARTIFACTS_DIR/jrc_water_prior_cache_v090 \
+  --output-dir $ARTIFACTS_DIR/water_prior_audit_EMSR342 \
+  --prior-cache-dir $ARTIFACTS_DIR/jrc_water_prior_cache \
   --split val \
   --include-events EMSR342 \
   --model-thresholds 0.30 0.35 0.40 0.45 0.50 0.55 0.60 0.65 0.70 \

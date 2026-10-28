@@ -14,22 +14,37 @@ This repository builds on and extends the original MMFlood codebase by Fabio Mon
 
 ## Reference model
 
-The current reference deployment is a U-Net with an ImageNet-pretrained ResNet34 encoder and Sentinel-1 `VV + VH` inputs.
+The deployed model is a U-Net with an ImageNet-pretrained ResNet34 encoder and Sentinel-1 `VV + VH` inputs in dB.
 
-| Item | Reference value |
+| Item | Value |
 |---|---:|
-| Training tiles | 3,981 |
+| Training tiles | 3,980 |
 | Validation tiles | 324 |
-| Test tiles | 386 |
-| Selected epoch | 4 |
+| Test scenes | 386 |
+| Selected epoch | 6 |
 | Operating threshold | 0.80 |
-| Test F1 | **0.5471** |
-| Test IoU | 0.3765 |
-| Test precision | 0.4528 |
-| Test recall | 0.6909 |
-| Test MCC | 0.5358 |
+| Out-of-fold event-macro F1 at 0.80 | 0.424 |
+| Test F1 | **0.520** |
+| Test IoU | 0.351 |
+| Test precision | 0.439 |
+| Test recall | 0.637 |
+| Test MCC | 0.508 |
 
-These numbers describe the retained test split for this model. They are not a general estimate of performance on every flood event or location. See [`MODEL_CARD.md`](MODEL_CARD.md) and [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) for the evaluation setup and limitations.
+Test metrics are pooled over all pixels of the held-out test split with the published labels. They are not a general estimate of performance on every flood event or location. See [`MODEL_CARD.md`](MODEL_CARD.md) and [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) for the evaluation setup and limitations.
+
+## Data conventions
+
+- SAR backscatter is stored in dB. No-data (zero or non-finite SAR, DEM voids) is kept as NaN and ignored in losses and metrics.
+- Morphological mask clean-up is applied to training masks only; validation and test use the published labels.
+- Each channel is clipped to robust percentiles, scaled to [0, 1] and standardised with train-fitted statistics (`robust_minmax`).
+- Augmentation is SAR-aware: radiometric jitter is additive in dB, blurring preserves physical units, and rotation corners and cut-out holes are excluded from the loss.
+- Deployment accepts linear or dB backscatter, converts it to the training units and writes no-data as 255.
+
+Run `python scripts/pipeline_smoke_test.py` (a few minutes on CPU) before any long job.
+
+## Continual learning
+
+`floodmap continual-train` trains on a sequence of tasks (by event year or by region) and compares rehearsal strategies against no-replay fine-tuning and cumulative joint training. On a Europe → rest-of-world split (three seeds, 100-tile buffer, fixed threshold 0.80), fine-tuning forgot 0.028 ± 0.015 F1 on Europe, hybrid rehearsal reduced this to 0.007 ± 0.009, and joint training reached the highest final F1 (0.536 ± 0.005). Across year-based tasks, forgetting was negligible for every strategy. See [`docs/CONTINUAL_LEARNING.md`](docs/CONTINUAL_LEARNING.md).
 
 ## What the package supports
 
@@ -52,6 +67,7 @@ These numbers describe the retained test split for this model. They are not a ge
 configs/                 Preprocessing and training configurations
 floods/                  Python package and CLI implementation
 docs/                    Data, deployment, validation and reproducibility guides
+notebooks/               Colab notebook that runs the full workflow
 reproducibility/         Machine-readable reference metrics
 scripts/                 Installation, smoke-test and environment helpers
 streamlit_app/           Streamlit prediction interface
@@ -79,10 +95,14 @@ python -m pytest -q
 
 ### Google Colab
 
-From the repository root in a fresh runtime:
+Open [`notebooks/colab_pipeline.ipynb`](notebooks/colab_pipeline.ipynb) in Colab. It installs the code from the
+repository zip uploaded to the runtime, restores the processed tiles from Drive to local disk (or builds them),
+runs the smoke test and then each pipeline step; every step can be re-run after a disconnect and continues where it stopped.
+
+To install by hand instead, from the repository root in a fresh runtime:
 
 ```bash
-bash scripts/install_colab.sh
+bash scripts/install_colab.sh          # FLOODMAP_SKIP_TESTS=1 skips the unit tests
 ```
 
 The installer keeps Colab's CUDA-compatible PyTorch build where possible, installs the tested dependency stack, runs the environment doctor and executes the package checks. See [`docs/COLAB.md`](docs/COLAB.md).
@@ -188,6 +208,7 @@ For a published experiment, keep at least:
 python -m compileall -q floods streamlit_app scripts tests
 python -m pytest -q
 python scripts/runtime_smoke.py
+python scripts/pipeline_smoke_test.py --clean   # end-to-end CLI run on synthetic scenes
 floodmap audit-code --project-root . --output-dir outputs/code_audit --plain-progress
 ```
 
@@ -195,8 +216,10 @@ GitHub Actions runs compile and regression checks on pushes and pull requests to
 
 ## Documentation
 
-- [`MODEL_CARD.md`](MODEL_CARD.md) — reference model, performance and limitations.
+- [`MODEL_CARD.md`](MODEL_CARD.md) — deployed model, performance and limitations.
 - [`docs/DATA.md`](docs/DATA.md) — dataset structure and preprocessing assumptions.
+- [`docs/CONTINUAL_LEARNING.md`](docs/CONTINUAL_LEARNING.md) — continual-learning strategies, task splits and results.
+- [`docs/COLAB.md`](docs/COLAB.md) — running the pipeline on Google Colab.
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — CLI deployment and portable bundles.
 - [`docs/EVENT_CV.md`](docs/EVENT_CV.md) — event-level validation.
 - [`docs/PRETRAINED_MODELS.md`](docs/PRETRAINED_MODELS.md) — registered weight sources.

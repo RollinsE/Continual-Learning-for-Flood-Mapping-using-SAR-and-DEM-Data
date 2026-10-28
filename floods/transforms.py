@@ -5,6 +5,8 @@ import torch
 from albumentations import Normalize
 from torch import Tensor
 
+from floods.inference_transforms import db_to_sar, sar_to_db  # noqa: F401 (re-exported)
+
 
 class Denormalize:
 
@@ -30,6 +32,21 @@ class Denormalize:
         tensor = tensor.permute(0, 2, 3, 1)
         tensor = tensor[0] if single_image else tensor
         return tensor.detach().cpu().numpy()
+
+
+def _finalise_normalised(result: np.ndarray, missing: np.ndarray) -> np.ndarray:
+    """Clamp normalised values and set missing (NaN) input pixels to 0.
+
+    0 is the training mean after standardisation, so no-data pixels carry no
+    artificial signal (filling raw units with 0 would mean 0 dB, i.e. bright).
+    Their labels are 255 (ignore), so they never contribute to the loss.
+    """
+    result = np.nan_to_num(np.asarray(result, dtype=np.float32), nan=0.0, posinf=30.0, neginf=-30.0)
+    result = np.clip(result, -30.0, 30.0).astype(np.float32, copy=False)
+    if missing is not None and missing.shape == result.shape and np.any(missing):
+        result = result.copy()
+        result[missing] = 0.0
+    return result
 
 
 class ClipNormalize(Normalize):
@@ -67,13 +84,13 @@ class ClipNormalize(Normalize):
         channels = img.shape[-1] if img.ndim == 3 else 1
         clip_min = self._broadcast_clip(self.clip_min, channels)
         clip_max = self._broadcast_clip(self.clip_max, channels)
+        missing = np.isnan(img)
         pos_fill = float(np.max(clip_max))
         neg_fill = float(np.min(clip_min))
         img = np.nan_to_num(img, nan=0.0, posinf=pos_fill, neginf=neg_fill)
         img = np.clip(img, clip_min, clip_max).astype(np.float32, copy=False)
         result = super().apply(img, **params)
-        result = np.nan_to_num(result, nan=0.0, posinf=30.0, neginf=-30.0)
-        return np.clip(result, -30.0, 30.0).astype(np.float32, copy=False)
+        return _finalise_normalised(result, missing)
 
     def get_transform_init_args_names(self):
         parent = list(super().get_transform_init_args_names())
@@ -108,6 +125,7 @@ class RobustMinMaxNormalize(Normalize):
         channels = img.shape[-1] if img.ndim == 3 else 1
         clip_min = self._broadcast_clip(self.clip_min, channels)
         clip_max = self._broadcast_clip(self.clip_max, channels)
+        missing = np.isnan(img)
         pos_fill = float(np.max(clip_max))
         neg_fill = float(np.min(clip_min))
         img = np.nan_to_num(img, nan=0.0, posinf=pos_fill, neginf=neg_fill)
@@ -116,8 +134,7 @@ class RobustMinMaxNormalize(Normalize):
         img = ((img - clip_min) / scale).astype(np.float32, copy=False)
         img = np.clip(img, 0.0, 1.0).astype(np.float32, copy=False)
         result = super().apply(img, **params)
-        result = np.nan_to_num(result, nan=0.0, posinf=30.0, neginf=-30.0)
-        return np.clip(result, -30.0, 30.0).astype(np.float32, copy=False)
+        return _finalise_normalised(result, missing)
 
     def get_transform_init_args_names(self):
         parent = list(super().get_transform_init_args_names())
@@ -172,6 +189,7 @@ class ProviderSARNormalize:
         image = np.asarray(image, dtype=np.float32).copy()
         if image.ndim == 2:
             image = image[..., None]
+        missing = np.isnan(image)
         sar_index = {"vv": 0, "vh": 1}
         for channel_index, modality in enumerate(self.modalities):
             if modality in sar_index:
@@ -182,6 +200,115 @@ class ProviderSARNormalize:
                 if self.dem_mean is None or self.dem_std is None:
                     raise ValueError("DEM provider statistics are required when DEM is active")
                 image[..., channel_index] = (image[..., channel_index] - self.dem_mean) / max(self.dem_std, 1e-6)
-        image = np.nan_to_num(image, nan=0.0, posinf=30.0, neginf=-30.0)
-        image = np.clip(image, -30.0, 30.0).astype(np.float32, copy=False)
-        return {"image": image, "mask": mask}
+        return {"image": _finalise_normalised(image, missing), "mask": mask}
+
+
+class SARRadiometricJitter:
+    """Additive-in-dB SAR augmentation: calibration offset plus speckle-like noise.
+
+    With probability ``p`` a common offset U(-gain_db, gain_db), a smaller per-channel
+    offset, and Gaussian pixel noise with sigma U(0, noise_db) are added in dB.
+    NaN (no-data) stays NaN. Values are converted to dB and back when tiles are
+    stored as linear or log1p, so the perturbation is physically the same.
+    """
+
+    def __init__(self, source_sar_transform: str = "db10", p: float = 0.5,
+                 gain_db: float = 1.0, channel_gain_db: float = 0.5, noise_db: float = 0.5,
+                 seed: int | None = None):
+        self.source_sar_transform = str(source_sar_transform or "db10").lower().replace("-", "_")
+        self.p = float(p)
+        self.gain_db = float(gain_db)
+        self.channel_gain_db = float(channel_gain_db)
+        self.noise_db = float(noise_db)
+        self.rng = np.random.default_rng(seed)
+
+    def __repr__(self) -> str:
+        return (f"SARRadiometricJitter(units={self.source_sar_transform}, p={self.p}, gain_db={self.gain_db}, "
+                f"channel_gain_db={self.channel_gain_db}, noise_db={self.noise_db})")
+
+    def set_random_seed(self, seed: int | None) -> None:
+        self.rng = np.random.default_rng(seed)
+
+    def __call__(self, *, image: np.ndarray, mask: np.ndarray = None, **kwargs):
+        if self.rng.random() >= self.p:
+            return {"image": image, "mask": mask}
+        image = np.asarray(image, dtype=np.float32)
+        squeeze = image.ndim == 2
+        if squeeze:
+            image = image[..., None]
+        db = sar_to_db(image, self.source_sar_transform)
+        channels = db.shape[-1]
+        offset = self.rng.uniform(-self.gain_db, self.gain_db)
+        offset = offset + self.rng.uniform(-self.channel_gain_db, self.channel_gain_db, size=(1, 1, channels))
+        sigma = self.rng.uniform(0.0, self.noise_db)
+        noise = self.rng.normal(0.0, sigma, size=db.shape) if sigma > 0 else 0.0
+        jittered = db_to_sar(db + offset + noise, self.source_sar_transform)
+        jittered = np.where(np.isfinite(image), jittered, np.nan).astype(np.float32)
+        if squeeze:
+            jittered = jittered[..., 0]
+        return {"image": jittered, "mask": mask}
+
+
+class PhysicalGaussianBlur:
+    """Gaussian blur for physical-unit rasters (dB, metres).
+
+    Albumentations' GaussianBlur clips float images to [0, 1], which destroys dB
+    and elevation values, so this applies OpenCV directly without clipping.
+    NaN (no-data) spreads into its neighbourhood and is later ignored in the loss.
+    """
+
+    def __init__(self, blur_limit: tuple[int, int] = (3, 7), p: float = 1.0, seed: int | None = None):
+        low, high = (int(blur_limit[0]), int(blur_limit[1]))
+        self.kernel_sizes = [k for k in range(low, high + 1) if k % 2 == 1] or [3]
+        self.p = float(p)
+        self.rng = np.random.default_rng(seed)
+
+    def __repr__(self) -> str:
+        return f"PhysicalGaussianBlur(kernel_sizes={self.kernel_sizes}, p={self.p})"
+
+    def set_random_seed(self, seed: int | None) -> None:
+        self.rng = np.random.default_rng(seed)
+
+    def __call__(self, *, image: np.ndarray, mask: np.ndarray = None, **kwargs):
+        if self.rng.random() >= self.p:
+            return {"image": image, "mask": mask}
+        import cv2
+
+        kernel = int(self.rng.choice(self.kernel_sizes))
+        image = np.asarray(image, dtype=np.float32)
+        blurred = cv2.GaussianBlur(image, (kernel, kernel), 0)
+        if blurred.ndim == 2 and image.ndim == 3:
+            blurred = blurred[..., None]
+        return {"image": blurred.astype(np.float32, copy=False), "mask": mask}
+
+
+class RandomChoice:
+    """Apply one randomly chosen transform with probability ``p`` (weighted like alb.OneOf).
+
+    Used instead of ``alb.OneOf`` so non-Albumentations transforms can be mixed in.
+    """
+
+    def __init__(self, transforms, weights=None, p: float = 0.5, seed: int | None = None):
+        self.transforms = list(transforms)
+        weights = np.asarray(weights if weights is not None else [1.0] * len(self.transforms), dtype=np.float64)
+        self.weights = weights / weights.sum()
+        self.p = float(p)
+        self.rng = np.random.default_rng(seed)
+
+    def __repr__(self) -> str:
+        return f"RandomChoice({self.transforms!r}, p={self.p})"
+
+    def set_random_seed(self, seed: int | None) -> None:
+        self.rng = np.random.default_rng(seed)
+
+    def __call__(self, *, image: np.ndarray, mask: np.ndarray = None, **kwargs):
+        if not self.transforms or self.rng.random() >= self.p:
+            return {"image": image, "mask": mask}
+        transform = self.transforms[int(self.rng.choice(len(self.transforms), p=self.weights))]
+        if hasattr(transform, "p") and not isinstance(transform, (PhysicalGaussianBlur, SARRadiometricJitter)):
+            # Albumentations transforms: force application once chosen, like alb.OneOf.
+            try:
+                return transform(image=image, mask=mask, force_apply=True)
+            except TypeError:
+                pass
+        return transform(image=image, mask=mask)

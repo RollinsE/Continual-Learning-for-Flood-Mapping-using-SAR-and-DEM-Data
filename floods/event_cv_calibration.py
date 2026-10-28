@@ -64,7 +64,7 @@ def select_cv_runs(
     selected = frame[frame["modalities"].astype(str).map(_normalise_modalities) == modality_key].copy()
     selector = candidate or architecture
     if not selector:
-        raise ValueError("Calibration requires --candidate (or legacy --architecture)")
+        raise ValueError("Calibration requires --candidate (or --architecture)")
     selector = str(selector)
     if candidate:
         masks = []
@@ -80,7 +80,7 @@ def select_cv_runs(
         selected = selected[mask]
     else:
         if "architecture" not in selected.columns:
-            raise ValueError("Legacy --architecture requires an architecture column in cv_results.csv")
+            raise ValueError("--architecture requires an architecture column in cv_results.csv")
         selected = selected[selected["architecture"].astype(str) == selector]
 
     if fold_indices is not None:

@@ -23,7 +23,7 @@ floodmap train \
   --config $ARTIFACTS_DIR/<BASELINE_RUN>/config.yaml \
   --processed-data-dir $PROCESSED_DIR \
   --artifacts-dir $ARTIFACTS_DIR \
-  --run-id flood_512_r50_sparse_crop_v082 \
+  --run-id flood_512_r50_sparse_crop \
   --image-size 512 \
   --num-workers 2 \
   --event-balanced-sampling \
@@ -62,4 +62,4 @@ A fallback means a requested crop could not satisfy the flood/valid-pixel rules 
 
 ## Authoritative validation metric
 
-When threshold-sweep monitoring is enabled, the epoch summary now reports all validation metrics at the selected threshold. The checkpoint metric and the displayed validation F1 therefore refer to the same operating point.
+When threshold-sweep monitoring is enabled, the epoch summary reports all validation metrics at the selected threshold. The checkpoint metric and the displayed validation F1 therefore refer to the same operating point.

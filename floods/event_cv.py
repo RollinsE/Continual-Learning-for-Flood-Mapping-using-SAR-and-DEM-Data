@@ -32,10 +32,10 @@ _CV_RESULT_SCHEMA_VERSION = 2
 def _cv_result_is_complete(payload: dict) -> bool:
     """Return whether a per-fold result marker represents a successful run.
 
-    Version 0.15.1 treated any ``cv_result.json`` as complete, including files
-    written after an interrupted training call.  Explicit status is used for
-    new markers, while legacy markers remain readable when their stop reason
-    is unambiguously successful.
+    A marker is complete when its status is ``completed`` and its stop reason is a
+    successful one.  Markers without a status are judged on the stop reason alone,
+    so a file written after an interrupted training call is not mistaken for a
+    finished fold.
     """
     result = payload.get("result")
     if not isinstance(result, dict):
@@ -301,10 +301,10 @@ def _aggregate_results(output_dir: Path) -> None:
         "candidate", "weights_source", "provider", "decoder", "encoder",
         "modalities", "normalization_mode",
     ]
-    # Older result matrices remain readable after an in-place package upgrade.
+    # Results written with --architectures have no candidate/provider columns; fill them in.
     if "candidate" not in frame.columns and "architecture" in frame.columns:
         frame["candidate"] = frame["architecture"]
-    for column, default in (("weights_source", "legacy"), ("provider", "legacy"), ("normalization_mode", "legacy")):
+    for column, default in (("weights_source", "unspecified"), ("provider", "unspecified"), ("normalization_mode", "unspecified")):
         if column not in frame.columns:
             frame[column] = default
     summary = (
@@ -403,11 +403,11 @@ def run_event_cross_validation(
     if candidates:
         raw_candidates.extend(parse_candidate_spec(value) for value in candidates)
     if architectures:
-        legacy_source = "imagenet" if pretrained is not False else "random"
+        architecture_source = "imagenet" if pretrained is not False else "random"
         for value in architectures:
             architecture = parse_architecture_spec(value)
             raw_candidates.append(CandidateSpec(
-                weights_source=legacy_source,
+                weights_source=architecture_source,
                 decoder=architecture.decoder,
                 encoder=architecture.encoder,
                 label=architecture.label,
@@ -423,7 +423,7 @@ def run_event_cross_validation(
     resolved_matrix: list[tuple[ResolvedModelSpec, list[str]]] = []
     for modality_values in modality_specs:
         for candidate in raw_candidates:
-            resolved = resolve_candidate(candidate, modality_values, legacy_pretrained=pretrained)
+            resolved = resolve_candidate(candidate, modality_values, default_pretrained=pretrained)
             resolved_matrix.append((resolved, modality_values))
 
     # Validate ordinary timm entries before spending time fitting normalization.

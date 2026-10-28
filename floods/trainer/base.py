@@ -545,10 +545,11 @@ class Trainer:
         return nullcontext() if full_precision else self.accelerator.autocast()
 
     def _gradients_are_finite(self) -> bool:
-        return all(
-            parameter.grad is None or bool(torch.isfinite(parameter.grad).all())
-            for parameter in self.model.parameters()
-        )
+        # One device->host sync for all parameters instead of one per parameter.
+        flags = [torch.isfinite(p.grad).all() for p in self.model.parameters() if p.grad is not None]
+        if not flags:
+            return True
+        return bool(torch.stack(flags).all())
 
     def _prepare_gradient_step(self) -> float:
         """Unscale, measure, optionally clip, and return the pre-clip norm."""

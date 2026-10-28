@@ -333,8 +333,8 @@ def _apply_training_overrides(config: TrainConfig, args: argparse.Namespace) -> 
     if source_value == "random" and bool(config.model.pretrained) and not explicit_source:
         source_value = "imagenet"
 
-    # Empty modality lists are valid in authoritative legacy configurations.  They
-    # continue to be resolved later by prepare_datasets.  Registered EO providers,
+    # An empty modality list is valid; prepare_datasets resolves it from in_channels
+    # and include_dem.  Registered EO providers,
     # however, require an explicit channel contract and fail here before training.
     modalities = list(getattr(config.data, "input_modalities", None) or [])
     provider_source = source_value not in {"random", "imagenet"}
@@ -391,6 +391,9 @@ def _apply_preprocess_overrides(config: PreparationConfig, args: argparse.Namesp
     _set_when_provided(config, "sar_transform", args.sar_transform)
     _set_when_provided(config, "preserve_mask_ignore", args.preserve_mask_ignore)
     _set_when_provided(config, "align_to_reference_grid", args.align_to_reference_grid)
+    _set_when_provided(config, "overwrite_existing", getattr(args, "overwrite_existing", None))
+    if getattr(args, "morphology_splits", None):
+        config.morphology_splits = [str(v).lower() for v in args.morphology_splits]
     if args.mask_flood_values:
         config.mask_flood_values = [int(v) for v in args.mask_flood_values]
     if args.mask_background_values:
@@ -583,7 +586,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     train_p.add_argument("--sparse-crop-hard-background-max-fg-ratio", type=float, help="Maximum flood ratio allowed in a hard-background crop. Default: 0.001.")
     train_p.add_argument("--sparse-crop-min-valid-ratio", type=float, help="Minimum non-ignore-pixel ratio required in a crop. Default: 0.50.")
     train_p.add_argument("--normalization-stats-path", help="Path to train-fitted normalization_stats.json.")
-    train_p.add_argument("--normalization-mode", help="Normalization mode: fixed, stats, robust_percentile, or robust_minmax.")
+    train_p.add_argument("--normalization-mode", help="Normalization mode: fixed, stats, robust_minmax (recommended), or robust_percentile (not recommended, see docs/DATA.md).")
     train_p.add_argument("--modality-dropout", dest="modality_dropout", action="store_true", default=None, help="Enable train-only modality dropout after normalization, usually for DEM regularisation.")
     train_p.add_argument("--no-modality-dropout", dest="modality_dropout", action="store_false")
     train_p.add_argument("--modality-dropout-prob", type=float, help="Probability of zeroing the selected modalities for each training sample, e.g. 0.30.")
@@ -621,14 +624,31 @@ def build_cli_parser() -> argparse.ArgumentParser:
     cl_p.add_argument("--output-folder", "--artifacts-dir", dest="output_folder", help="Run/artifacts root folder.")
     cl_p.add_argument("--run-id", "--name", dest="run_id", help="Base run identifier; the strategy name is appended automatically.")
     cl_p.add_argument("--activations-json-path", type=Path, required=True, help="MMFlood activations JSON with event start dates and split metadata.")
-    cl_p.add_argument("--strategies", nargs="+", default=["random", "least_confidence", "margin", "entropy"], choices=["random", "least_confidence", "margin", "entropy"], help="Replay strategies to run.")
+    cl_p.add_argument("--strategies", nargs="+", default=["finetune", "random", "least_confidence", "entropy", "hybrid", "joint"],
+                      choices=["finetune", "random", "least_confidence", "entropy", "hybrid", "joint", "margin"],
+                      help="Strategies to run. finetune = no replay (lower bound); joint = cumulative training on all seen tasks "
+                           "(upper bound); hybrid = half uncertainty-weighted, half random replay. margin is equivalent to "
+                           "least_confidence for a sigmoid output and selects the same samples.")
     cl_p.add_argument("--task-year-ranges", nargs="+", default=["2014-2017", "2018-2019", "2020-2021"], help="Chronological task ranges, e.g. 2014-2017 2018-2019 2020-2021.")
+    cl_p.add_argument("--task-split", choices=["year", "region"], default="year",
+                      help="year: tasks are --task-year-ranges (default); region: tasks are --task-regions.")
+    cl_p.add_argument("--task-regions", nargs="+", default=["europe", "asia", "americas+africa+oceania"],
+                      help="Region tasks in training order, used with --task-split region. Regions: europe, asia, africa, "
+                           "americas, oceania; join with '+' to merge, e.g. europe asia americas+africa+oceania.")
+    cl_p.add_argument("--cl-dry-run", action="store_true", default=False,
+                      help="Print the task sizes (tiles, events, countries) and exit without training.")
     cl_p.add_argument("--epochs-per-task", type=int, default=5, help="Number of epochs to train on each chronological task.")
     cl_p.add_argument("--replay-buffer-size", type=int, default=100, help="Maximum number of training samples retained for replay.")
     cl_p.add_argument("--replay-batch-size", type=int, default=16, help="Replay samples drawn from the buffer for each current-task batch.")
     cl_p.add_argument("--replay-mode", choices=["separate", "concat"], default="separate",
                       help="Memory-safe replay mode. 'separate' forwards current and replay batches separately; 'concat' preserves concatenated replay.")
-    cl_p.add_argument("--uncertainty-subset-fraction", type=float, default=1.0, help="Fraction of the replay buffer scored by uncertainty strategies.")
+    cl_p.add_argument("--uncertainty-subset-fraction", type=float, default=1.0, help="Fraction of the replay buffer scored (once per epoch) by uncertainty strategies.")
+    cl_p.add_argument("--uncertainty-sampling", choices=["proportional", "topk"], default="proportional",
+                      help="proportional: draw replay tiles with probability proportional to uncertainty (default); "
+                           "topk: always take the most uncertain tiles.")
+    cl_p.add_argument("--cl-threshold", type=float, default=None,
+                      help="Fixed decision threshold for every CL evaluation. Default: chosen after each task on the "
+                           "validation tiles of the tasks seen so far.")
     cl_p.add_argument("--resume", action="store_true", default=False,
                       help="Resume a continual-learning run from models/last.ckpt in the strategy/member output folder.")
     cl_p.add_argument("--resume-from", type=Path,
@@ -761,6 +781,8 @@ def build_cli_parser() -> argparse.ArgumentParser:
     prep_p.add_argument("--no-clip-dem", dest="clip_dem", action="store_false")
     prep_p.add_argument("--morphology", dest="morphology", action="store_true", default=None)
     prep_p.add_argument("--no-morphology", dest="morphology", action="store_false")
+    prep_p.add_argument("--morphology-splits", nargs="+", choices=["train", "val", "test"], help="Splits whose flood masks get morphological clean-up (default: train only).")
+    prep_p.add_argument("--overwrite-existing", dest="overwrite_existing", action="store_true", default=None, help="Delete existing processed tiles of each split before re-tiling.")
     prep_p.add_argument("--tiling", dest="tiling", action="store_true", default=None)
     prep_p.add_argument("--no-tiling", dest="tiling", action="store_false")
     prep_p.add_argument("--make-context", dest="make_context", action="store_true", default=None)
@@ -818,7 +840,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     domain_shift_p.add_argument("--exclude-reference-events", nargs="+", help="Optional reference EMSR events to exclude.")
     domain_shift_p.add_argument("--input-modalities", nargs="+", help="Ordered channels. Defaults to the training config or vv vh dem.")
     domain_shift_p.add_argument("--normalization-stats-path", type=Path, help="Optional train-fitted normalization JSON for clipping-rate diagnostics.")
-    domain_shift_p.add_argument("--normalization-mode", help="Normalization mode associated with the checkpoint, e.g. robust_percentile.")
+    domain_shift_p.add_argument("--normalization-mode", help="Normalization mode associated with the checkpoint, e.g. robust_minmax.")
     domain_shift_p.add_argument("--max-reference-tiles", type=int, default=0, help="Optional event-stratified cap; 0 audits every reference tile.")
     domain_shift_p.add_argument("--max-target-tiles", type=int, default=0, help="Optional cap; 0 audits every target tile.")
     domain_shift_p.add_argument("--max-pixels-per-tile", type=int, default=256, help="Natural-distribution pixels sampled per tile and modality.")
@@ -1192,6 +1214,8 @@ def build_cli_parser() -> argparse.ArgumentParser:
 
 
     dep_p = sub.add_parser("export-deployment", help="Write a deployment manifest for a single model or ensemble operating point.")
+    dep_p.add_argument("--sar-units", choices=["db10", "log1p", "linear"], default=None,
+                       help="SAR units the model was trained on. Default: read from the training config or the processed-data manifest.")
     dep_p.add_argument("--output-file", required=True, type=Path, help="Manifest path, .yaml/.yml or .json. By default the parent directory becomes a portable deployment bundle.")
     dep_p.add_argument("--model-name", default="flood_model")
     dep_bundle = dep_p.add_mutually_exclusive_group()
@@ -1221,6 +1245,8 @@ def build_cli_parser() -> argparse.ArgumentParser:
     disc_p.add_argument("--candidate-name-template", help="Optional Python format template for candidate IDs. Available fields: {scene_id}, {date}, {stem}, {index}, {kind}.")
 
     pred_p = sub.add_parser("predict-scene", help="Run deployment inference on a direct SAR/DEM scene or a folder with multiple SAR acquisitions.")
+    pred_p.add_argument("--input-sar-units", choices=["auto", "linear", "db"], default="auto",
+                        help="Units of the uploaded VV/VH backscatter. auto detects linear power vs dB; inputs are converted to the units the model was trained on.")
     pred_p.add_argument("--manifest", required=True, type=Path, help="Deployment manifest from export-deployment.")
     pred_p.add_argument("--sar-path", type=Path, help="Input two-band SAR GeoTIFF. Expected band 1=VV and band 2=VH.")
     pred_p.add_argument("--scene-dir", type=Path, help="Folder containing one or more deployable SAR files. Use discover-scene to inspect it first.")
@@ -1279,7 +1305,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     cv_p.add_argument("--processed-data-dir", type=Path, required=True, help="Processed MMFlood dataset root.")
     cv_p.add_argument("--output-dir", type=Path, required=True, help="Root for fold plan, normalization stats, runs, and ranked summaries.")
     cv_p.add_argument("--candidates", nargs="+", help="SOURCE[:DECODER[:ENCODER[:LABEL]]] candidates, e.g. terramind_v1_tiny or imagenet:unet:resnet34.")
-    cv_p.add_argument("--architectures", nargs="+", help="Legacy decoder:encoder[:label] candidates; mapped using --pretrained.")
+    cv_p.add_argument("--architectures", nargs="+", help="Candidates as decoder:encoder[:label]; weights follow --pretrained. Prefer --candidates.")
     cv_p.add_argument("--modality-sets", nargs="+", default=["vv+vh", "vv+vh+dem"], help="Input sets such as vv+vh and vv+vh+dem.")
     cv_p.add_argument("--folds", type=int, default=5, help="Number of event-separated folds.")
     cv_p.add_argument("--fold-indices", nargs="+", type=int, help="Run only selected zero-based folds; omit to run all folds.")
@@ -1322,7 +1348,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
     cv_cal_p.add_argument("--processed-data-dir", type=Path, required=True, help="Processed MMFlood dataset root used by the CV runs.")
     cv_cal_p.add_argument("--output-dir", type=Path, required=True, help="Directory for OOF calibration CSV, JSON, and log outputs.")
     cv_cal_p.add_argument("--candidate", help="Candidate label or weights-source name from cv_results.csv.")
-    cv_cal_p.add_argument("--architecture", help="Legacy architecture label from older cv_results.csv.")
+    cv_cal_p.add_argument("--architecture", help="Architecture label in cv_results.csv, for results written with --architectures.")
     cv_cal_p.add_argument("--modalities", default="vv+vh", help="Modality label from cv_results.csv, for example vv+vh.")
     cv_cal_p.add_argument("--fold-indices", nargs="+", type=int, help="Optional zero-based fold subset; omit to use every completed matching fold.")
     cv_cal_p.add_argument("--thresholds", nargs="+", type=float, required=True, help="Probability thresholds evaluated uniformly across all OOF folds.")
@@ -1390,7 +1416,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
                 "--dynamic-progress",
                 dest="plain_progress",
                 action="store_false",
-                help="Allow dynamic progress bars when the terminal supports them.",
+                help="Show live green tqdm progress bars, including in Colab cells.",
             )
 
     return parser
@@ -1806,7 +1832,8 @@ def _dispatch_command(args: argparse.Namespace, parser: argparse.ArgumentParser)
                       write_window_diagnostics=args.write_window_diagnostics,
                       window_blend=args.window_blend,
                       output_mode=args.output_mode,
-                      prediction_only=args.prediction_only)
+                      prediction_only=args.prediction_only,
+                      input_sar_units=args.input_sar_units)
         return
     
     if args.command == "export-deployment":
@@ -1827,6 +1854,7 @@ def _dispatch_command(args: argparse.Namespace, parser: argparse.ArgumentParser)
                                   window_batch_size=args.window_batch_size,
                                   window_blend=args.window_blend,
                                   notes=args.notes,
+                                  sar_units=args.sar_units,
                                   copy_assets=args.copy_assets,
                                   assets_directory=args.assets_directory)
         return
@@ -1903,7 +1931,7 @@ def _dispatch_command(args: argparse.Namespace, parser: argparse.ArgumentParser)
         normalization_mode = args.normalization_mode
         if normalization_mode is None and config is not None:
             normalization_mode = getattr(config.data, "normalization_mode", None)
-        normalization_mode = normalization_mode or "robust_percentile"
+        normalization_mode = normalization_mode or "robust_minmax"
         from floods.domain_shift_audit import audit_domain_shift
         audit_domain_shift(
             processed_data_dir=processed_data_dir,
@@ -2006,6 +2034,9 @@ def _dispatch_command(args: argparse.Namespace, parser: argparse.ArgumentParser)
                         activations_json_path=args.activations_json_path,
                         strategies=args.strategies,
                         task_year_ranges=args.task_year_ranges,
+                        task_split=args.task_split,
+                        task_regions=args.task_regions,
+                        dry_run=args.cl_dry_run,
                         epochs_per_task=args.epochs_per_task,
                         replay_buffer_size=args.replay_buffer_size,
                         replay_batch_size=args.replay_batch_size,
@@ -2019,6 +2050,8 @@ def _dispatch_command(args: argparse.Namespace, parser: argparse.ArgumentParser)
                         ensemble_members=args.ensemble_members,
                         ensemble_method=args.ensemble_method,
                         replay_mode=args.replay_mode,
+                        uncertainty_sampling=args.uncertainty_sampling,
+                        fixed_threshold=args.cl_threshold,
                         resume=args.resume,
                         resume_from=args.resume_from,
                         resume_start_task=args.resume_start_task,
@@ -2117,8 +2150,10 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
     args = parser.parse_args(argv_list)
     if getattr(args, "plain_progress", None) is True:
         os.environ["FLOODMAP_PLAIN_PROGRESS"] = "1"
+        os.environ.pop("FLOODMAP_DYNAMIC_PROGRESS", None)
     elif getattr(args, "plain_progress", None) is False:
         os.environ.pop("FLOODMAP_PLAIN_PROGRESS", None)
+        os.environ["FLOODMAP_DYNAMIC_PROGRESS"] = "1"
     prepare_logging(getattr(args, "log_level", "INFO"))
     command_line = shlex.join(["floodmap", *argv_list])
     log_file = _default_command_log_file(args)

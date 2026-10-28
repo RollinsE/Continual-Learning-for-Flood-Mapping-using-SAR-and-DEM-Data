@@ -26,7 +26,7 @@ from floods.utils.gis import imread
 LOG = get_logger(__name__)
 
 DERIVED_BAND_ORDER = DERIVED_MODALITIES
-DERIVED_SCHEMA_VERSION = 2
+DERIVED_SCHEMA_VERSION = 3
 
 @dataclass(frozen=True)
 class DerivedFeatureParameters:
@@ -105,7 +105,37 @@ def pixel_spacing_meters(transform, crs, width: int, height: int) -> tuple[float
     return x_metres, y_metres
 
 
-def _derived_file_is_current(path: Path, params: DerivedFeatureParameters) -> bool:
+def processed_sar_units(processed_data_dir: Path) -> str:
+    """Return the SAR representation of processed tiles from preprocessing_manifest.json.
+
+    Without a recognised manifest entry the tiles are assumed to be log10(1 + linear).
+    """
+    manifest_path = Path(processed_data_dir) / "preprocessing_manifest.json"
+    if manifest_path.exists():
+        value = str(json.loads(manifest_path.read_text(encoding="utf-8")).get("sar_transform", "")).strip().lower()
+        if value in {"db10", "log1p", "linear"}:
+            return value
+    LOG.warning("No recognised sar_transform in %s; assuming log1p SAR tiles.", manifest_path)
+    return "log1p"
+
+
+def _sar_channel_db(values: np.ndarray, sar_units: str, eps: float) -> np.ndarray:
+    """Return one SAR channel in dB from its processed representation."""
+    units = str(sar_units or "db10").lower()
+    values = np.asarray(values, dtype=np.float32)
+    if units == "db10":
+        return values
+    with np.errstate(invalid="ignore", divide="ignore"):
+        if units == "log1p":
+            linear = np.power(10.0, values) - 1.0
+        elif units == "linear":
+            linear = values
+        else:
+            raise ValueError(f"Unsupported SAR units: {sar_units}")
+        return 10.0 * np.log10(np.maximum(linear, eps))
+
+
+def _derived_file_is_current(path: Path, params: DerivedFeatureParameters, sar_units: str | None = None) -> bool:
     """Return True only for a complete derived raster written by this schema."""
     try:
         with rasterio.open(path) as src:
@@ -116,6 +146,7 @@ def _derived_file_is_current(path: Path, params: DerivedFeatureParameters) -> bo
                 and tags.get("derived_schema_version") == str(DERIVED_SCHEMA_VERSION)
                 and tags.get("log_ratio_eps") == str(params.log_ratio_eps)
                 and tags.get("tpi_radius_pixels") == str(params.tpi_radius_pixels)
+                and (sar_units is None or tags.get("sar_units") == str(sar_units))
             )
     except (OSError, rasterio.errors.RasterioError):
         return False
@@ -226,6 +257,7 @@ def derive_feature_channels(
     pixel_size_y: float,
     modalities: Sequence[str],
     params: DerivedFeatureParameters | None = None,
+    sar_units: str = "linear",
 ) -> dict[str, np.ndarray]:
     """Compute only the requested derived channels.
 
@@ -250,7 +282,9 @@ def derive_feature_channels(
 
     if "vv_vh_log_ratio" in requested:
         eps = float(params.log_ratio_eps)
-        ratio = 10.0 * np.log10(np.maximum(vv, eps)) - 10.0 * np.log10(np.maximum(vh, eps))
+        # VV/VH ratio in dB is a difference of dB values; ``sar_units`` says how the
+        # processed tiles store backscatter (dB tiles must not be log-transformed again).
+        ratio = _sar_channel_db(vv, sar_units, eps) - _sar_channel_db(vh, sar_units, eps)
         finite_sar = np.isfinite(vv) & np.isfinite(vh)
         result["vv_vh_log_ratio"] = np.where(finite_sar, ratio, np.nan).astype(
             np.float32,
@@ -303,6 +337,7 @@ def derive_feature_stack(
     pixel_size_x: float,
     pixel_size_y: float,
     params: DerivedFeatureParameters | None = None,
+    sar_units: str = "linear",
 ) -> np.ndarray:
     """Create VV/VH log-ratio, DEM slope, and local DEM TPI.
 
@@ -315,6 +350,7 @@ def derive_feature_stack(
         pixel_size_y=pixel_size_y,
         modalities=DERIVED_BAND_ORDER,
         params=params,
+        sar_units=sar_units,
     )
     return np.stack([channels[name] for name in DERIVED_BAND_ORDER], axis=0).astype(
         np.float32,
@@ -337,6 +373,7 @@ def build_derived_features(
         tpi_radius_pixels=int(tpi_radius_pixels),
     ).validate()
     split_summaries: dict[str, dict[str, int]] = {}
+    sar_units = processed_sar_units(processed_data_dir)
 
     for split in splits:
         sar_dir = processed_data_dir / split / "sar"
@@ -354,7 +391,7 @@ def build_derived_features(
             if not dem_path.exists():
                 raise FileNotFoundError(f"Missing DEM tile for {stem}: {dem_path}")
             if out_path.exists() and not overwrite:
-                if _derived_file_is_current(out_path, params):
+                if _derived_file_is_current(out_path, params, sar_units):
                     skipped += 1
                     continue
                 stale_rewritten += 1
@@ -377,6 +414,7 @@ def build_derived_features(
                     pixel_size_x=pixel_size_x_m,
                     pixel_size_y=pixel_size_y_m,
                     params=params,
+                    sar_units=sar_units,
                 )
                 profile = sar_src.profile.copy()
                 if not profile.get("tiled", False):
@@ -400,6 +438,7 @@ def build_derived_features(
                         pixel_size_y_metres=f"{pixel_size_y_m:.9f}",
                         log_ratio_eps=str(params.log_ratio_eps),
                         tpi_radius_pixels=str(params.tpi_radius_pixels),
+                        sar_units=str(sar_units),
                     )
             written += 1
         split_summaries[str(split)] = {
@@ -423,10 +462,11 @@ def build_derived_features(
         "processed_data_dir": str(processed_data_dir),
         "band_order": list(DERIVED_BAND_ORDER),
         "formulas": {
-            "vv_vh_log_ratio": "10*log10(max(VV,eps)) - 10*log10(max(VH,eps))",
+            "vv_vh_log_ratio": "VV_dB - VH_dB (tiles converted to dB first when stored as linear/log1p)",
             "dem_slope": "degrees(arctan(sqrt((dDEM/dx_m)^2 + (dDEM/dy_m)^2)))",
             "dem_tpi": "DEM - local_mean(DEM)",
         },
+        "sar_units": sar_units,
         "parameters": {
             "log_ratio_eps": params.log_ratio_eps,
             "tpi_radius_pixels": params.tpi_radius_pixels,

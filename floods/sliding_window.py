@@ -41,7 +41,7 @@ def _window_starts(length: int, window_size: int, stride: int) -> list[int]:
 def _blend_weights(window_size: int, mode: str, *, device: torch.device) -> torch.Tensor:
     """Return a positive 2-D blending window for overlap-add inference.
 
-    ``uniform`` reproduces the historical arithmetic mean. ``cosine`` reduces
+    ``uniform`` takes the arithmetic mean of overlapping windows. ``cosine`` reduces
     the influence of less reliable window borders while retaining a small
     positive floor so outer-scene pixels remain covered.
     """

@@ -72,7 +72,7 @@ def _check_transforms() -> None:
         std=(0.25, 0.25, 0.25),
         clip_min=(-1.0, -1.0, -1.0),
         clip_max=(1.0, 1.0, 1.0),
-        normalization_mode="robust_percentile",
+        normalization_mode="robust_minmax",
     )
     for profile in ["none", "geometric", "sar_radiometric", "standard", "crop_aware", "deformation", "composite"]:
         out = train_transforms_base(64, augmentation_profile=profile)(image=image.copy(), mask=mask.copy())
@@ -96,7 +96,7 @@ def _check_dataset_loading(repo_root: Path, dataset_root: Path) -> None:
     config.data.augmentation_profile = "geometric"
     stats_path = dataset_root.parent / "normalization_stats.json"
     fit_normalization_stats(dataset_root, stats_path, split="train", input_modalities=["vv", "vh", "dem"], max_pixels_per_file=64)
-    config.data.normalization_mode = "robust_percentile"
+    config.data.normalization_mode = "robust_minmax"
     config.data.normalization_stats_path = str(stats_path)
     train_set, val_set = prepare_datasets(config=config, use_rgb=False)
     assert len(train_set) == 8
