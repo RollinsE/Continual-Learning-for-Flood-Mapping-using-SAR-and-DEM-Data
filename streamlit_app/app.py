@@ -75,6 +75,16 @@ def _clear_previous_workspace() -> None:
         shutil.rmtree(previous, ignore_errors=True)
 
 
+def _reset_session() -> None:
+    """Remove the previous results and empty the upload widgets."""
+    _clear_previous_workspace()
+    st.session_state["floodmap_upload_round"] = st.session_state.get("floodmap_upload_round", 0) + 1
+
+
+def _upload_signature(uploads) -> list[tuple[str, int]]:
+    return sorted((str(item.name), int(item.size)) for item in uploads or [])
+
+
 def _zip_directory(root: Path) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -316,6 +326,7 @@ with st.sidebar:
     )
 
 st.subheader("Inputs")
+upload_round = st.session_state.get("floodmap_upload_round", 0)
 st.write(
     "Upload one SAR tile or a complete set of tiles. The application inspects band counts automatically; "
     "separate single-band VV/VH files are paired when their polarization can be identified safely."
@@ -325,6 +336,7 @@ sar_uploads = st.file_uploader(
     type=["tif", "tiff"],
     accept_multiple_files=True,
     help="Select one or more SAR GeoTIFFs. You do not need to declare whether a file contains one band or a combined VV/VH pair.",
+    key=f"floodmap_sar_uploads_{upload_round}",
 )
 _unit_labels = {"Detect automatically": "auto", "Linear power (σ⁰/γ⁰)": "linear", "Decibels (dB)": "db"}
 st.session_state["floodmap_sar_units"] = _unit_labels[st.radio(
@@ -341,6 +353,7 @@ if needs_dem:
         type=["tif", "tiff"],
         accept_multiple_files=True,
         help="DEM files are matched to SAR tiles by canonical tile identifier, not upload order.",
+        key=f"floodmap_dem_uploads_{upload_round}",
     )
 else:
     dem_uploads = []
@@ -351,6 +364,7 @@ mask_uploads = st.file_uploader(
     type=["tif", "tiff"],
     accept_multiple_files=True,
     help="Masks are optional and used only for evaluation. They are matched to SAR tiles by canonical tile identifier.",
+    key=f"floodmap_mask_uploads_{upload_round}",
 )
 
 if sar_uploads:
@@ -365,7 +379,15 @@ if sar_uploads:
     except Exception as exc:
         st.warning(f"One or more SAR files could not be inspected yet: {exc}")
 
-run_clicked = st.button("Run flood mapping", type="primary", disabled=not sar_uploads)
+current_signature = _upload_signature(list(sar_uploads or []) + list(dem_uploads or []) + list(mask_uploads or []))
+button_cols = st.columns([1, 1, 4])
+run_clicked = button_cols[0].button("Run flood mapping", type="primary", disabled=not sar_uploads)
+button_cols[1].button(
+    "Clear results and uploads",
+    on_click=_reset_session,
+    disabled=not (sar_uploads or dem_uploads or mask_uploads or st.session_state.get("floodmap_result")),
+    help="Remove the current results and uploaded files to start a new test.",
+)
 
 if run_clicked and sar_uploads:
     all_uploads = list(sar_uploads) + list(dem_uploads or []) + list(mask_uploads or [])
@@ -467,9 +489,13 @@ if run_clicked and sar_uploads:
         "collection_report": str(collection_report),
         "manifest_summary": manifest_summary,
         "expected_tiles": len(candidates),
+        "upload_signature": current_signature,
     }
     st.session_state["floodmap_result"] = payload
 
 payload = st.session_state.get("floodmap_result")
 if payload:
+    if payload.get("upload_signature") != current_signature:
+        st.info("These results are for the previous set of files. Click **Run flood mapping** to process the current "
+                "uploads, or **Clear results and uploads** to start again.")
     _display_results(payload)
