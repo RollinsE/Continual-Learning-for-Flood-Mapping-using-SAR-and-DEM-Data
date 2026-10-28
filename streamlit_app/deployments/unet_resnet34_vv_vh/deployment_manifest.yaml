@@ -1,5 +1,5 @@
 schema_version: 2
-model_name: unet_resnet34_vv_vh
+model_name: unet_resnet34_vv_vh_db
 mode: single
 bundle:
   portable: true
@@ -16,11 +16,14 @@ inputs:
   modalities:
   - vv
   - vh
-  normalization_mode: robust_percentile
-  sar_units: log1p
+  normalization_mode: robust_minmax
   normalization_stats_path: assets/normalization/normalization_stats.json
+  sar_units: db10
   sar_contract: Analysis-ready GeoTIFF. Either one file with VV band 1 and VH band
-    2, or paired VV/VH files discovered from a scene folder.
+    2, or paired VV/VH files discovered from a scene folder. Backscatter may be linear
+    power or dB (detected automatically or set with --input-sar-units); it is converted
+    to the training units recorded in sar_units. 0/NaN/nodata pixels are treated as
+    no data.
   dem_contract: Single-band DEM GeoTIFF aligned to SAR or resampleable to the SAR
     grid.
 inference:
@@ -49,4 +52,5 @@ outputs:
   probability: Optional float32 GeoTIFF containing flood probability before thresholding.
   report: Optional HTML report with input previews, prediction overlays, uncertainty
     and explanation panels.
-notes: Selected U-Net ResNet34 VV+VH flood-extent deployment.
+notes: U-Net ResNet34, Sentinel-1 VV+VH in dB, release 0.17.0; threshold from out-of-fold
+  event-CV.
