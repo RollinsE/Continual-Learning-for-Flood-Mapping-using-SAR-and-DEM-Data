@@ -105,7 +105,8 @@ def build_collection_mosaic(predictions: Sequence[dict[str, Any]], output_dir: P
     for item in predictions:
         mask_path = Path(item["output_mask"])
         with rasterio.open(mask_path) as src:
-            tmp_mask = np.zeros((height, width), dtype=np.uint8)
+            # Prediction masks use 255 for no data (e.g. outside the SAR swath).
+            tmp_mask = np.full((height, width), 255, dtype=np.uint8)
             tmp_cov = np.zeros((height, width), dtype=np.uint8)
             reproject(
                 source=rasterio.band(src, 1),
@@ -115,6 +116,7 @@ def build_collection_mosaic(predictions: Sequence[dict[str, Any]], output_dir: P
                 src_nodata=src.nodata,
                 dst_transform=dst_transform,
                 dst_crs=dst_crs,
+                dst_nodata=255,
                 resampling=Resampling.nearest,
             )
             reproject(
@@ -127,9 +129,9 @@ def build_collection_mosaic(predictions: Sequence[dict[str, Any]], output_dir: P
                 dst_nodata=0,
                 resampling=Resampling.nearest,
             )
-            valid = tmp_cov > 0
+            valid = (tmp_cov > 0) & (tmp_mask != 255)
             coverage[valid] += 1
-            flood_union[valid] = np.maximum(flood_union[valid], (tmp_mask[valid] > 0).astype(np.uint8))
+            flood_union[valid] = np.maximum(flood_union[valid], (tmp_mask[valid] == 1).astype(np.uint8))
 
         prob_value = item.get("output_probability")
         if prob_value and Path(prob_value).is_file():

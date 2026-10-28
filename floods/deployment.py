@@ -129,7 +129,7 @@ def _resolve_manifest_reference(manifest_path: Path, value: str | Path, *, role:
     """Resolve an absolute or manifest-relative file reference.
 
     Deployment manifests are portable when their asset paths are relative to the
-    manifest directory.  Absolute paths remain supported for legacy manifests.
+    manifest directory.  Absolute paths are also accepted.
     """
     raw = str(value or "").strip()
     if not raw:
@@ -257,6 +257,23 @@ def _configured_normalization_stats(config_path: Path) -> tuple[Optional[Path], 
     if not path.is_absolute():
         path = Path(config_path).resolve().parent / path
     return path.resolve(), str(mode) if mode else None
+
+
+def _configured_sar_units(config_path: Path) -> Optional[str]:
+    """SAR units the model was trained on: config value, else the processed-data manifest."""
+    payload = _load_trusted_yaml(Path(config_path))
+    data = payload.get("data") or {}
+    value = str(data.get("source_sar_transform") or "auto").strip().lower()
+    if value in {"db10", "log1p", "linear"}:
+        return value
+    data_path = data.get("path")
+    if data_path:
+        manifest = Path(str(data_path)).expanduser() / "preprocessing_manifest.json"
+        if manifest.is_file():
+            recorded = str(json.loads(manifest.read_text(encoding="utf-8")).get("sar_transform", "")).lower()
+            if recorded in {"db10", "log1p", "linear"}:
+                return recorded
+    return None
 
 
 def _write_bundle_readme(path: Path, manifest_name: str) -> Path:
@@ -597,9 +614,8 @@ def discover_scene(scene_dir: Path,
                    candidate_name_template: Optional[str] = None) -> list[dict[str, Any]]:
     """Inventory an event folder and group deployable SAR candidates.
 
-    The command accepts analysis-ready GeoTIFFs.  Candidate IDs no longer force an
-    ``undated_`` prefix; if no acquisition date can be found the clean file stem is
-    used and the ``date`` column is left empty.  The inventory also records bounds
+    The command accepts analysis-ready GeoTIFFs.  If no acquisition date can be found,
+    the candidate ID is the file stem and the ``date`` column is left empty.  The inventory also records bounds
     and pixel size so users can decide whether tiles are spatially adjacent.
     """
     scene_dir = Path(scene_dir)
@@ -1219,7 +1235,8 @@ def write_deployment_manifest(output_file: Path,
                               window_blend: str = "uniform",
                               notes: Optional[str] = None,
                               copy_assets: bool = True,
-                              assets_directory: str = "assets") -> Path:
+                              assets_directory: str = "assets",
+                              sar_units: Optional[str] = None) -> Path:
     """Write a deployment manifest and, by default, a portable asset bundle.
 
     Portable manifests contain only paths relative to the manifest itself.  The
@@ -1253,7 +1270,16 @@ def write_deployment_manifest(output_file: Path,
         if mode:
             configured_modes.append(mode)
 
-    resolved_mode = str(normalization_mode or (configured_modes[0] if configured_modes else "robust_percentile"))
+    resolved_mode = str(normalization_mode or (configured_modes[0] if configured_modes else "robust_minmax"))
+    if sar_units:
+        from floods.inference_transforms import canonical_sar_units
+        resolved_sar_units = canonical_sar_units(sar_units, "db10")
+    else:
+        resolved_sar_units = _configured_sar_units(config_sources[0])
+        if resolved_sar_units is None:
+            resolved_sar_units = "log1p"
+            LOG.warning("Could not determine the SAR units the model was trained on; recording 'log1p'. "
+                        "Pass --sar-units to export-deployment to set it explicitly.")
     stats_source: Optional[Path] = None
     if normalization_stats_path:
         candidate = Path(str(normalization_stats_path)).expanduser()
@@ -1348,7 +1374,10 @@ def write_deployment_manifest(output_file: Path,
             "modalities": list(input_modalities or ["vv", "vh", "dem"]),
             "normalization_mode": resolved_mode,
             "normalization_stats_path": bundled_stats_reference,
-            "sar_contract": "Analysis-ready GeoTIFF. Either one file with VV band 1 and VH band 2, or paired VV/VH files discovered from a scene folder.",
+            "sar_units": resolved_sar_units,
+            "sar_contract": "Analysis-ready GeoTIFF. Either one file with VV band 1 and VH band 2, or paired VV/VH files discovered from a scene folder. "
+                            "Backscatter may be linear power or dB (detected automatically or set with --input-sar-units); "
+                            "it is converted to the training units recorded in sar_units. 0/NaN/nodata pixels are treated as no data.",
             "dem_contract": "Single-band DEM GeoTIFF aligned to SAR or resampleable to the SAR grid.",
         },
         "inference": {
@@ -1434,7 +1463,7 @@ def _read_band_to_reference_grid(
             and src.crs == ref_crs
         )
         if same_grid:
-            return src.read(1).astype(np.float32)
+            return _nodata_to_nan(src.read(1).astype(np.float32), src.nodata)
         if src.crs is None or ref_crs is None or ref_transform is None:
             raise ValueError(
                 f"{label} grid differs from the SAR reference grid, but one raster lacks CRS/transform metadata; "
@@ -1456,6 +1485,29 @@ def _read_band_to_reference_grid(
         return values
 
 
+def _nodata_to_nan(values: np.ndarray, nodata: Any) -> np.ndarray:
+    values = np.asarray(values, dtype=np.float32)
+    if nodata is not None:
+        try:
+            nodata_value = float(nodata)
+        except (TypeError, ValueError):
+            return values
+        if np.isfinite(nodata_value):
+            values = np.where(values == nodata_value, np.nan, values).astype(np.float32)
+    return values
+
+
+def _check_band_order(descriptions: Sequence[Optional[str]], path: Path) -> tuple[int, int]:
+    """Return (vv_band, vh_band) 1-based indices, honouring band descriptions when present."""
+    labels = [str(d or "").strip().lower() for d in descriptions[:2]]
+    if labels == ["vh", "vv"]:
+        _deploy_log("Band descriptions of %s say band 1 = VH and band 2 = VV; swapping to VV/VH order.", Path(path).name, level="summary")
+        return 2, 1
+    if labels and any(labels) and labels != ["vv", "vh"]:
+        _deploy_log("Band descriptions of %s are %s; assuming band 1 = VV and band 2 = VH.", Path(path).name, labels, level="summary")
+    return 1, 2
+
+
 def _read_sar_arrays(candidate: SceneCandidate | Path) -> tuple[np.ndarray, np.ndarray, dict]:
     if isinstance(candidate, Path):
         candidate = SceneCandidate(candidate_id=_safe_name(candidate.stem), kind="multiband_vv_vh", date=_extract_date(candidate), sar_path=candidate)
@@ -1463,15 +1515,16 @@ def _read_sar_arrays(candidate: SceneCandidate | Path) -> tuple[np.ndarray, np.n
         with rasterio.open(str(candidate.sar_path)) as src:
             if src.count < 2:
                 raise ValueError(f"SAR raster must have at least two bands. Got {src.count}: {candidate.sar_path}")
-            vv = src.read(1).astype(np.float32)
-            vh = src.read(2).astype(np.float32)
+            vv_band, vh_band = _check_band_order(src.descriptions, Path(candidate.sar_path))
+            vv = _nodata_to_nan(src.read(vv_band), src.nodata)
+            vh = _nodata_to_nan(src.read(vh_band), src.nodata)
             profile = src.profile.copy()
             profile["bounds"] = tuple(float(v) for v in src.bounds)
         return vv, vh, profile
     if not candidate.vv_path or not candidate.vh_path:
         raise ValueError(f"Candidate {candidate.candidate_id} is not a complete VV/VH pair")
     with rasterio.open(str(candidate.vv_path)) as vv_src:
-        vv = vv_src.read(1).astype(np.float32)
+        vv = _nodata_to_nan(vv_src.read(1), vv_src.nodata)
         profile = vv_src.profile.copy()
         profile["bounds"] = tuple(float(v) for v in vv_src.bounds)
         height, width = vv_src.height, vv_src.width
@@ -1493,11 +1546,16 @@ def _build_tensor_from_arrays(vv: np.ndarray,
                               modalities: Sequence[str],
                               normalization_mode: str,
                               normalization_stats_path: Path,
-                              device: torch.device) -> tuple[torch.Tensor, dict[str, np.ndarray]]:
+                              device: torch.device,
+                              model_sar_units: str = "log1p",
+                              input_sar_units: str = "auto") -> tuple[torch.Tensor, dict[str, np.ndarray]]:
     from floods.modalities import canonicalize_modalities
+    from floods.inference_transforms import prepare_sar_input
 
     modalities = canonicalize_modalities(modalities)
     height, width = vv.shape
+    vv, vh, detected_units = prepare_sar_input(vv, vh, input_sar_units, model_sar_units)
+    _deploy_log("SAR input units: %s -> model units: %s", detected_units, model_sar_units, level="standard")
     raw_channels: dict[str, np.ndarray] = {"vv": vv.astype(np.float32), "vh": vh.astype(np.float32)}
     sar_crs = profile.get("crs")
     sar_transform = profile.get("transform")
@@ -1515,6 +1573,10 @@ def _build_tensor_from_arrays(vv: np.ndarray,
             resampling=Resampling.bilinear,
             label="DEM",
         )
+        # Same DEM handling as preprocessing: voids/fill values -> NaN, valid range clipped.
+        dem = np.where(np.isfinite(dem) & (dem >= -1000.0) & (dem <= 9000.0), dem, np.nan)
+        with np.errstate(invalid="ignore"):
+            dem = np.clip(dem, -100.0, 6000.0).astype(np.float32)
         raw_channels["dem"] = dem
 
     requested_derived = [
@@ -1540,12 +1602,15 @@ def _build_tensor_from_arrays(vv: np.ndarray,
                 pixel_size_x=pixel_size_x,
                 pixel_size_y=pixel_size_y,
                 modalities=requested_derived,
+                sar_units=model_sar_units,
             )
         )
 
     channels = [raw_channels[name] for name in modalities]
+    # NaN (no data) is kept: the inference transform sets it to the normalised mean (0)
+    # and the prediction is masked as no-data afterwards.
     image = np.stack(channels, axis=-1).astype(np.float32)
-    image = np.nan_to_num(image, nan=0.0, posinf=30.0, neginf=-30.0)
+    image = np.where(np.isinf(image), np.nan, image).astype(np.float32)
     from floods.normalization import describe_stats, load_normalization_stats
     from floods.inference_transforms import eval_transforms
 
@@ -1563,9 +1628,12 @@ def _build_scene_tensor(sar_path: Path,
                         modalities: Sequence[str],
                         normalization_mode: str,
                         normalization_stats_path: Path,
-                        device: torch.device) -> tuple[torch.Tensor, dict, dict[str, np.ndarray]]:
+                        device: torch.device,
+                        model_sar_units: str = "log1p",
+                        input_sar_units: str = "auto") -> tuple[torch.Tensor, dict, dict[str, np.ndarray]]:
     vv, vh, profile = _read_sar_arrays(Path(sar_path))
-    tensor, raw_channels = _build_tensor_from_arrays(vv, vh, dem_path, profile, modalities, normalization_mode, normalization_stats_path, device)
+    tensor, raw_channels = _build_tensor_from_arrays(vv, vh, dem_path, profile, modalities, normalization_mode, normalization_stats_path, device,
+                                                     model_sar_units=model_sar_units, input_sar_units=input_sar_units)
     return tensor, profile, raw_channels
 
 
@@ -1632,13 +1700,19 @@ def _deployment_raster_profile(profile: dict, dtype: str, nodata: Optional[float
     return out_profile
 
 
-def _write_mask(path: Path, profile: dict, mask: np.ndarray) -> None:
-    # Do not set nodata=0 because 0 is the valid non-flood class.
-    out_profile = _deployment_raster_profile(profile, dtype="uint8", nodata=None)
+def _write_mask(path: Path, profile: dict, mask: np.ndarray, valid: Optional[np.ndarray] = None) -> None:
+    """Write 0 = non-flood, 1 = flood, and 255 = no data (when ``valid`` is given)."""
+    out = mask.astype(np.uint8)
+    nodata = None  # never 0: 0 is the valid non-flood class
+    if valid is not None:
+        out = out.copy()
+        out[~valid] = 255
+        nodata = 255
+    out_profile = _deployment_raster_profile(profile, dtype="uint8", nodata=nodata)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with rasterio.open(str(path), "w", **out_profile) as dst:
-        dst.write(mask.astype(np.uint8), 1)
+        dst.write(out, 1)
 
 
 def _write_float(path: Path, profile: dict, values: np.ndarray, nodata: Optional[float] = None) -> None:
@@ -1990,7 +2064,7 @@ def _scope_css_for_notebook(css_text: str, scope: str = ".floodmap-notebook-repo
 
 
 def _notebook_safe_report_fragment(report_html: str) -> str:
-    """Return a CSS-isolated notebook fragment for current or legacy reports.
+    """Return a CSS-isolated notebook fragment for a deployment report.
 
     Colab/Jupyter insert :class:`IPython.display.HTML` into the notebook DOM rather
     than an isolated browser document.  Every stylesheet is therefore rewritten
@@ -2273,16 +2347,31 @@ def _predict_candidate(candidate: SceneCandidate,
                        explain_per_modality: bool,
                        write_window_diagnostics: bool,
                        device: torch.device,
-                       manifest_path: Path) -> dict[str, Any]:
+                       manifest_path: Path,
+                       model_sar_units: str = "log1p",
+                       input_sar_units: str = "auto") -> dict[str, Any]:
     _deploy_log("Reading SAR candidate %s", candidate.candidate_id)
     vv, vh, profile = _read_sar_arrays(candidate)
     _deploy_log("Building input stack: modalities=%s shape=%sx%s", ",".join(modalities), vv.shape[0], vv.shape[1])
-    tensor, raw_channels = _build_tensor_from_arrays(vv, vh, dem_path, profile, modalities, normalization_mode, normalization_stats_path, device)
+    tensor, raw_channels = _build_tensor_from_arrays(vv, vh, dem_path, profile, modalities, normalization_mode, normalization_stats_path, device,
+                                                     model_sar_units=model_sar_units, input_sar_units=input_sar_units)
+    # Pixels where any model input is missing (outside the swath, DEM voids) are no data.
+    valid = np.ones(vv.shape, dtype=bool)
+    for name in modalities:
+        if name in raw_channels:
+            valid &= np.isfinite(raw_channels[name])
+    nodata_pixels = int((~valid).sum())
+    if nodata_pixels:
+        _deploy_log("No-data pixels excluded from the prediction: %d (%.2f%%)", nodata_pixels, 100.0 * nodata_pixels / valid.size)
     _deploy_log("Running inference: mode=%s window=%s overlap=%s models=%d", inference_mode, window_size, window_overlap, len(models))
     probability, uncertainty = _infer_probability(models, tensor, method, inference_mode, window_size, window_overlap, window_batch_size, window_blend)
     _deploy_log("Applying threshold %.3f and component filter min_area=%d", threshold, min_component_area)
-    pred = (probability >= threshold).astype(np.uint8)
+    pred = ((probability >= threshold) & valid).astype(np.uint8)
     pred = _apply_component_filter(pred, min_component_area)
+    probability_geotiff = np.where(valid, probability, np.nan).astype(np.float32)
+    probability = np.where(valid, probability, 0.0).astype(np.float32)  # previews/overlays only
+    if uncertainty is not None:
+        uncertainty = np.where(valid, uncertainty, np.nan).astype(np.float32)
     pixel_area = _pixel_area_km2(profile)
 
     output_dir = Path(output_dir)
@@ -2297,15 +2386,15 @@ def _predict_candidate(candidate: SceneCandidate,
     flood_mask_path = Path(output_mask) if output_mask else output_dir / f"{prefix}_flood_mask.tif"
     prob_path = Path(output_probability) if output_probability else output_dir / f"{prefix}_flood_probability.tif"
     _deploy_log("Writing binary flood mask GeoTIFF: %s", flood_mask_path)
-    _write_mask(flood_mask_path, profile, pred)
+    _write_mask(flood_mask_path, profile, pred, valid=valid)
     if write_probability or output_probability:
         _deploy_log("Writing flood probability GeoTIFF: %s", prob_path)
-        _write_float(prob_path, profile, probability)
+        _write_float(prob_path, profile, probability_geotiff, nodata=float("nan"))
     uncertainty_path = None
     if write_uncertainty and uncertainty is not None:
         uncertainty_path = output_dir / f"{prefix}_ensemble_uncertainty.tif"
         _deploy_log("Writing ensemble uncertainty GeoTIFF: %s", uncertainty_path)
-        _write_float(uncertainty_path, profile, uncertainty)
+        _write_float(uncertainty_path, profile, uncertainty, nodata=float("nan"))
 
     target_mask = None
     evaluation_metrics = None
@@ -2330,6 +2419,7 @@ def _predict_candidate(candidate: SceneCandidate,
         )
         _deploy_log("Reading ground-truth mask for labelled-scene evaluation: %s", mask_path)
         target_mask = _read_mask_for_evaluation(Path(mask_path), profile, pred.shape)
+        target_mask = np.where(valid, target_mask, 255).astype(np.uint8)  # no-data pixels are not scored
         evaluation_metrics = _compute_binary_metrics(pred, target_mask)
         metrics_path = output_dir / f"{prefix}_evaluation_metrics.json"
         cm_json_path = output_dir / f"{prefix}_confusion_matrix.json"
@@ -2408,7 +2498,11 @@ def _predict_candidate(candidate: SceneCandidate,
         "threshold": float(threshold),
         "min_component_area": int(min_component_area),
         "flood_pixels": int(pred.sum()),
-        "flood_fraction": float(pred.sum() / max(1, pred.size)),
+        "valid_pixels": int(valid.sum()),
+        "nodata_pixels": nodata_pixels,
+        "flood_fraction": float(pred.sum() / max(1, int(valid.sum()))),
+        "sar_input_units": str(input_sar_units),
+        "model_sar_units": str(model_sar_units),
         "flood_area_km2": float(pred.sum() * pixel_area) if pixel_area is not None else None,
         "mask_path": str(mask_path) if mask_path else None,
         "mask_alignment": mask_alignment,
@@ -2519,7 +2613,7 @@ def _deployment_settings(manifest: dict[str, Any], configs: Sequence[TrainConfig
         raise FileNotFoundError(f"Deployment normalization statistics not found: {resolved_stats_path}.{hint}")
     return {
         "modalities": inputs.get("modalities") or ["vv", "vh", "dem"],
-        "normalization_mode": inputs.get("normalization_mode") or configs[0].data.normalization_mode or "robust_percentile",
+        "normalization_mode": inputs.get("normalization_mode") or configs[0].data.normalization_mode or "robust_minmax",
         "normalization_stats_path": resolved_stats_path,
         "method": str(manifest.get("ensemble_method") or "mean_logit").lower().replace("-", "_"),
         "inference_mode": str(inference.get("mode") or "sliding_window").lower().replace("-", "_"),
@@ -2529,6 +2623,8 @@ def _deployment_settings(manifest: dict[str, Any], configs: Sequence[TrainConfig
         "window_blend": str(inference.get("window_blend") or "uniform").lower().replace("-", "_"),
         "threshold": float(operating_point.get("threshold", 0.5)),
         "min_component_area": int(operating_point.get("min_component_area", 0)),
+        # A manifest without sar_units describes a model trained on log10(1 + linear) tiles.
+        "sar_units": str(inputs.get("sar_units") or "log1p"),
     }
 
 
@@ -2565,8 +2661,13 @@ def predict_scene(manifest_path: Path,
                   write_window_diagnostics: bool = False,
                   window_blend: Optional[str] = None,
                   output_mode: str = "standard",
-                  prediction_only: bool = False) -> dict[str, Any]:
-    """Run deployment inference on one direct SAR/DEM scene or a discovered scene folder."""
+                  prediction_only: bool = False,
+                  input_sar_units: str = "auto") -> dict[str, Any]:
+    """Run deployment inference on one direct SAR/DEM scene or a discovered scene folder.
+
+    ``input_sar_units`` describes the uploaded backscatter: ``auto`` (detect linear vs dB),
+    ``linear`` or ``db``. It is converted to the units recorded in the bundle (``sar_units``).
+    """
     _set_deploy_output_mode(output_mode)
     mosaic_mode = str(mosaic_mode or "smart").lower().strip()
     if mosaic_compatible_sar_tiles and mosaic_mode in {"smart", "plan"}:
@@ -2713,7 +2814,9 @@ def predict_scene(manifest_path: Path,
                                     explain_per_modality=explain_per_modality,
                                     write_window_diagnostics=write_window_diagnostics,
                                     device=torch_device,
-                                    manifest_path=Path(manifest_path))
+                                    manifest_path=Path(manifest_path),
+                                    model_sar_units=settings["sar_units"],
+                                    input_sar_units=input_sar_units)
         results.append(result)
 
     summary = {

@@ -60,7 +60,7 @@ def infer_default_modalities(
             result.append("dem")
         if len(result) != int(in_channels):
             raise ValueError(
-                f"Legacy RGB configuration declares in_channels={in_channels}, but resolves to {result}. "
+                f"RGB configuration declares in_channels={in_channels}, but resolves to {result}. "
                 "Set data.input_modalities explicitly."
             )
         return result
@@ -68,7 +68,7 @@ def infer_default_modalities(
     result = ["vv", "vh"] + (["dem"] if include_dem else [])
     if len(result) != int(in_channels):
         raise ValueError(
-            f"Legacy flood configuration declares in_channels={in_channels}, but resolves to {result}. "
+            f"Flood configuration declares in_channels={in_channels}, but resolves to {result}. "
             "Set data.input_modalities explicitly for derived or non-standard channels."
         )
     return result

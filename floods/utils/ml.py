@@ -28,10 +28,53 @@ def seed_everything(seed: int, deterministic: bool = True) -> None:
     torch.backends.cudnn.benchmark = False
 
 
+def reseed_transform_tree(transform: Any, seed: int, _depth: int = 0) -> None:
+    """Seed Albumentations-style transforms that keep private random generators.
+
+    Albumentations >= 2 transforms own ``random_generator``/``py_random`` objects that
+    ignore ``np.random.seed``. Each nested transform gets a distinct derived seed so
+    that, for example, flips and rotations are not perfectly correlated.
+    """
+    if transform is None or _depth > 10:
+        return
+    setter = getattr(transform, "set_random_seed", None)
+    if callable(setter):
+        try:
+            setter(int(seed) % (2**32))
+        except TypeError:
+            pass
+    children = getattr(transform, "transforms", None)
+    if isinstance(children, (list, tuple)):
+        for index, child in enumerate(children):
+            reseed_transform_tree(child, (int(seed) + 1009 * (index + 1)) % (2**32), _depth + 1)
+
+
+def _unwrap_dataset(dataset: Any, max_depth: int = 8) -> Any:
+    for _ in range(max_depth):
+        if hasattr(dataset, "reseed_augmentations"):
+            return dataset
+        inner = getattr(dataset, "dataset", None)
+        if inner is None:
+            return dataset
+        dataset = inner
+    return dataset
+
+
+def reseed_dataset_augmentations(dataset: Any, seed: int) -> None:
+    """Re-seed augmentation RNGs of a (possibly wrapped) FloodDataset."""
+    target = _unwrap_dataset(dataset)
+    reseed = getattr(target, "reseed_augmentations", None)
+    if callable(reseed):
+        reseed(int(seed) % (2**32))
+
+
 def seed_worker(worker_id: int):
     worker_seed = torch.initial_seed() % 2**32 + worker_id
-    np.random.seed(worker_seed)
+    np.random.seed(worker_seed % 2**32)
     random.seed(worker_seed)
+    info = torch.utils.data.get_worker_info()
+    if info is not None:
+        reseed_dataset_augmentations(info.dataset, worker_seed)
 
 
 def progressbar(

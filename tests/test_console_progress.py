@@ -22,3 +22,17 @@ def test_progress_iter_uses_line_mode_when_dynamic_progress_is_disabled(monkeypa
     progress = progress_iter(range(2), desc="Plain")
     assert isinstance(progress, LineProgress)
     assert dynamic_progress_supported() is False
+
+
+def test_dynamic_progress_can_be_forced_and_is_green(monkeypatch):
+    monkeypatch.delenv("FLOODMAP_PLAIN_PROGRESS", raising=False)
+    monkeypatch.delenv("MMFLOOD_PLAIN_PROGRESS", raising=False)
+    monkeypatch.setenv("COLAB_RELEASE_TAG", "test")
+    monkeypatch.setenv("FLOODMAP_DYNAMIC_PROGRESS", "1")
+    assert dynamic_progress_supported() is True
+    bar = progress_iter(range(3), desc="Forced", colour="blue")
+    assert not isinstance(bar, LineProgress)
+    assert bar.colour == "green"
+    assert list(bar) == [0, 1, 2]
+    monkeypatch.setenv("FLOODMAP_PLAIN_PROGRESS", "1")
+    assert dynamic_progress_supported() is False

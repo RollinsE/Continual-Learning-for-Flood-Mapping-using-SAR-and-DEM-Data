@@ -1,38 +1,39 @@
 {
-  "schema_version": 1,
-  "release": "0.11.0",
+  "schema_version": 2,
   "model": {
     "architecture": "unet",
     "encoder": "resnet34",
     "modalities": ["vv", "vh"],
+    "sar_units": "db10",
+    "normalization_mode": "robust_minmax",
     "seed": 42,
     "training_epochs": 6,
-    "selected_epoch": 4,
+    "selected_epoch": 6,
     "threshold": 0.8
   },
   "dataset": {
-    "train_tiles": 3981,
+    "train_tiles": 3980,
     "validation_tiles": 324,
-    "test_tiles": 386
+    "test_scenes": 386,
+    "test_labels": "published masks (no morphological clean-up)"
   },
-  "cross_validation_calibration": {
-    "training_events": 54,
-    "folds": 5,
-    "event_macro_f1": 0.4199612588,
-    "worst_event_f1": 0.1518158778,
-    "global_f1": 0.4261445703
+  "cross_validation": {
+    "folds_planned": 5,
+    "folds_run": [0, 1],
+    "fold0_event_macro_f1": {"vv+vh": 0.4781, "vv+vh+dem": 0.4597}
   },
-  "final_validation": {
-    "f1": 0.4596,
-    "selected_epoch": 4
+  "threshold_calibration": {
+    "source": "out-of-fold predictions, folds 0 and 1",
+    "threshold": 0.8,
+    "event_macro_f1": 0.4240
   },
   "test": {
-    "f1": 0.5471,
-    "iou": 0.3765,
-    "precision": 0.4528,
-    "recall": 0.6909,
-    "mcc": 0.5358,
-    "empty_tile_false_positive_rate": 0.0,
-    "nonempty_tile_recall": 0.9870
+    "inference": "sliding_window, window 512, overlap 128",
+    "metric_mode": "global",
+    "f1": 0.5200,
+    "iou": 0.3514,
+    "precision": 0.4391,
+    "recall": 0.6374,
+    "mcc": 0.5081
   }
 }

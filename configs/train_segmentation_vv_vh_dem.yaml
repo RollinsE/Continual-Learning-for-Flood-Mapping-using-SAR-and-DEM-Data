@@ -82,7 +82,7 @@ data:
   hard_negative_region_max_fraction: 0.35
   hard_negative_crop_probability: 1.0
   normalization_stats_path: null
-  normalization_mode: robust_percentile
+  normalization_mode: robust_minmax
   modality_dropout: false
   modality_dropout_prob: 0.0
   drop_modalities:

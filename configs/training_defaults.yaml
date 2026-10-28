@@ -75,7 +75,7 @@ data:
   disable_grid_distortion: false
   disable_sar_noise: false
   normalization_stats_path: null
-  normalization_mode: robust_percentile
+  normalization_mode: robust_minmax
   source_sar_transform: auto
   pos_weight_from_train: true
   pos_weight_max: 20.0

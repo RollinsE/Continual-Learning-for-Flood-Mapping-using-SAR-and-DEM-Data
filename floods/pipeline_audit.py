@@ -98,7 +98,7 @@ def audit_code_quality(project_root: Path, output_dir: Path, banned_terms: Optio
         "/content/drive/MyDrive", "MyDrive/mmflood_runs", "mmflood_processed_256",
         "preprocess_mmflood_256.yaml", "stats_train_256.yaml",
     ])
-    allowed_parts = {"CHANGELOG.md", "deprecated", "pipeline_audit.py", "tests", "COLAB.md"}
+    allowed_parts = {"deprecated", "pipeline_audit.py", "tests", "COLAB.md"}
     rows: List[dict] = []
     exts = {".py", ".yaml", ".yml", ".md", ".txt"}
     for path in project_root.rglob("*"):

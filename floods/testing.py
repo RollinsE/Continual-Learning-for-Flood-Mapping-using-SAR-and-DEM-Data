@@ -31,7 +31,10 @@ def test(test_config: TestConfig):
     config: TrainConfig = load_config(path=config_path, config_class=TrainConfig)
     print_config(LOG, config)
 
-    accelerator = Accelerator(fp16=config.trainer.amp, cpu=config.trainer.cpu)
+    try:
+        accelerator = Accelerator(mixed_precision="fp16" if config.trainer.amp else "no", cpu=config.trainer.cpu)
+    except TypeError:  # accelerate < 0.10
+        accelerator = Accelerator(fp16=config.trainer.amp, cpu=config.trainer.cpu)
     accelerator.wait_for_everyone()
 
     LOG.info("Using seed: %d", config.seed)

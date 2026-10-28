@@ -55,7 +55,7 @@ data:
   hard_positive_region_sampling: false
   modality_dropout: false
   normalization_stats_path: null
-  normalization_mode: robust_percentile
+  normalization_mode: robust_minmax
   pos_weight_from_train: true
   pos_weight_max: 20.0
   cache_dir: outputs/cache

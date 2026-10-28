@@ -35,7 +35,9 @@ def _write_tif(path: Path, data: np.ndarray) -> None:
         dst.write(data)
 
 
-def _make_processed_dataset(root: Path, splits=("train", "val", "test")) -> None:
+def _make_processed_dataset(root: Path, splits=("train", "val", "test"), sar_transform: str = "linear") -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "preprocessing_manifest.json").write_text(json.dumps({"sar_transform": sar_transform}), encoding="utf-8")
     height = width = 32
     yy, xx = np.mgrid[:height, :width]
     vv = (0.05 + xx * 0.001).astype(np.float32)
@@ -194,3 +196,22 @@ def test_stale_derived_schema_is_regenerated(tmp_path):
     with rasterio.open(derived_path) as src:
         assert src.tags()["derived_schema_version"] == str(DERIVED_SCHEMA_VERSION)
         assert src.tags()["slope_horizontal_units"] == "metres"
+
+
+def test_log_ratio_on_db_tiles_is_a_difference_not_a_second_log():
+    vv_db = np.full((8, 8), -8.0, dtype=np.float32)
+    vh_db = np.full((8, 8), -15.0, dtype=np.float32)
+    dem = np.zeros((8, 8), dtype=np.float32)
+    result = derive_feature_stack(np.stack([vv_db, vh_db]), dem, pixel_size_x=10.0, pixel_size_y=10.0, sar_units="db10")
+    np.testing.assert_allclose(result[0], 7.0, atol=1e-5)
+
+
+def test_build_derived_features_reads_db_units_from_manifest(tmp_path):
+    _make_processed_dataset(tmp_path, splits=("train",), sar_transform="db10")
+    manifest = build_derived_features(tmp_path, splits=("train",))
+    assert manifest["sar_units"] == "db10"
+    with rasterio.open(tmp_path / "train" / "derived" / "EMSR342-1-1_0_0.tif") as src:
+        ratio = src.read(1)
+    with rasterio.open(tmp_path / "train" / "sar" / "EMSR342-1-1_0_0.tif") as src:
+        sar = src.read()
+    np.testing.assert_allclose(ratio, sar[0] - sar[1], atol=1e-5)

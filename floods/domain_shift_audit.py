@@ -565,7 +565,7 @@ def audit_domain_shift(
     exclude_reference_events: Sequence[str] | None = None,
     input_modalities: Sequence[str] = ("vv", "vh", "dem"),
     normalization_stats_path: Path | None = None,
-    normalization_mode: str = "robust_percentile",
+    normalization_mode: str = "robust_minmax",
     max_reference_tiles: int = 0,
     max_target_tiles: int = 0,
     max_pixels_per_tile: int = 256,

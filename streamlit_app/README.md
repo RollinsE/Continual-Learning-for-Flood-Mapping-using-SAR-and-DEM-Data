@@ -16,7 +16,7 @@ streamlit_app/deployments/
     └── assets/...
 ```
 
-If more than one valid manifest is present, the app displays a model selector. The selected manifest controls required modalities, threshold, window size and model assets. A legacy single bundle under `streamlit_app/deployment/` is still discovered.
+If more than one valid manifest is present, the app displays a model selector. The selected manifest controls required modalities, threshold, window size and model assets. A single bundle under `streamlit_app/deployment/` is also discovered.
 
 For a custom location, set:
 
@@ -59,6 +59,10 @@ From the repository root:
 python -m pip install -r streamlit_app/requirements.txt
 streamlit run streamlit_app/app.py
 ```
+
+## Colab
+
+Section 7 of [`notebooks/colab_pipeline.ipynb`](../notebooks/colab_pipeline.ipynb) exports the trained model into `deployments/` and starts the app with a temporary public link.
 
 ## Streamlit Community Cloud
 

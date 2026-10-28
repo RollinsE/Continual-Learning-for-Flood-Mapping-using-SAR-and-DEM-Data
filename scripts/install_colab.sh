@@ -27,7 +27,11 @@ python -m pip install \
 python -m pip install --no-deps --no-build-isolation -e . 2>&1 | tee -a "$INSTALL_LOG"
 python -m compileall -q floods scripts tests
 python -m floods.cli doctor --strict --json-output environment_report.json 2>&1 | tee -a "$INSTALL_LOG"
-python -m pytest -q 2>&1 | tee -a "$INSTALL_LOG"
+if [[ "${FLOODMAP_SKIP_TESTS:-0}" == "1" ]]; then
+  echo "Skipping the unit tests (FLOODMAP_SKIP_TESTS=1)." | tee -a "$INSTALL_LOG"
+else
+  python -m pytest -q 2>&1 | tee -a "$INSTALL_LOG"
+fi
 
 python - <<'PY'
 import torch

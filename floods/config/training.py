@@ -257,7 +257,7 @@ class DatasetConfig(EnvConfig):
     sparse_crop_hard_background_max_fg_ratio: float = Field(0.001, description="Maximum flood-pixel ratio allowed in a hard-background crop.")
     sparse_crop_min_valid_ratio: float = Field(0.50, description="Minimum non-ignore-pixel ratio required in a crop.")
     normalization_stats_path: Optional[str] = Field(None, description="Optional train-fitted normalization_stats.json to use for clipping and normalization")
-    normalization_mode: str = Field("fixed", description="Normalization source: fixed, stats, robust_percentile, robust_minmax, ssl4eo_s1, or terramind_v1")
+    normalization_mode: str = Field("fixed", description="Normalization source: fixed, stats, robust_minmax (recommended), robust_percentile (not recommended; see docs/DATA.md), ssl4eo_s1, or terramind_v1")
     source_sar_transform: str = Field("auto", description="Processed SAR representation before provider normalization: auto, linear, log1p, or db10")
     modality_dropout: bool = Field(False, description="Apply train-only input-modality dropout after normalization. Useful for regularising DEM dependence.")
     modality_dropout_prob: float = Field(0.0, description="Probability of applying modality dropout to each training sample.")

@@ -1,27 +1,49 @@
 # Continual-learning workflow
 
-The `continual-train` command runs chronological rehearsal experiments on the processed MMFlood dataset. It keeps the same model, preprocessing, loss, normalization, ignore-mask handling, and global threshold-sweep metrics used by the main `train` and `evaluate` commands.
+`continual-train` runs chronological rehearsal experiments on the processed MMFlood dataset. EMSR events are grouped into tasks by the year of their start date (default) or by geographic region (see [Task splits](#task-splits)), and the model is trained on the tasks in order. It uses the same model, preprocessing, loss, normalisation, ignore-label handling and global threshold-sweep metrics as `train` and `evaluate`.
 
-## Objective
+## Strategies
 
-The command supports adaptive flood-mapping experiments where EMSR events are introduced as chronological tasks. It compares replay strategies against a non-CL baseline by training sequentially over year ranges and evaluating both mixed validation performance and task-by-task retention.
+| Strategy | Replay | Purpose |
+|---|---|---|
+| `finetune` | none | Sequential training without memory. Lower bound; shows how much is forgotten. |
+| `random` | uniform from a reservoir buffer | Standard rehearsal baseline. |
+| `least_confidence` | sampled ∝ mean pixel `1 − max(p, 1 − p)` | Uncertainty-guided rehearsal. |
+| `entropy` | sampled ∝ mean pixel binary entropy | Uncertainty-guided rehearsal. |
+| `hybrid` | half ∝ entropy, half uniform | Uncertainty with diversity. |
+| `joint` | none; trains on all tasks seen so far | Upper bound (cumulative training). |
 
-Implemented replay strategies:
+`margin` is also accepted, but for a single sigmoid output it equals 2 × `least_confidence` and selects exactly the same samples, so it should not be reported as a separate strategy.
 
-- `random`: samples uniformly from the replay buffer.
-- `least_confidence`: scores replay candidates by low binary confidence.
-- `margin`: scores candidates near the binary decision boundary.
-- `entropy`: scores candidates by prediction entropy.
+The replay buffer is a reservoir over all training tiles of completed tasks (`--replay-buffer-size`). Each current-task batch is paired with `--replay-batch-size` replay tiles; with `--replay-mode separate` (default) the two losses are averaged with sample-count weights.
+
+Uncertainty scores are computed **once per epoch**, at the start of the epoch, on non-augmented copies of the buffer tiles, averaging over valid (non-ignore) pixels only. Replay tiles are then drawn **in proportion to their score** for every batch, so uncertain tiles are favoured without replaying the same few tiles all epoch. `--uncertainty-sampling topk` restores deterministic top-k selection; `--uncertainty-subset-fraction` scores a random fraction of the buffer to save time on large buffers.
+
+## Evaluation protocol
+
+After each task *t* the model is evaluated on every task seen so far (1…*t*). This produces the task matrix in `cl_results.json`.
+
+- **Threshold:** one threshold per evaluation row. It is chosen on the **validation** tiles of tasks 1…*t* using `--threshold-metric`, then applied unchanged to every cell of that row, including test cells. `--cl-threshold 0.5` fixes it instead (useful for a locked operating point). The per-cell best threshold is stored as `oracle_best` for diagnostics only; never report it as a result.
+- **No checkpoint selection across tasks:** the model at the end of each task is saved (`models/after_task_<t>.pth`) and evaluated. Per-epoch validation is logged on seen-task validation tiles only; it never looks at future tasks.
+- **Summary (`cl_summary`)**, all at the selected threshold:
+  - `mean_final_task_score` — mean score over all tasks after the last task (average accuracy);
+  - `mean_plasticity` — mean score on each task right after learning it;
+  - `mean_forgetting` / `max_forgetting` — best-seen minus final score, over all but the last task;
+  - `backward_transfer` — final minus just-learned score, over all but the last task (negative = forgetting).
+- When more than one strategy is run, `<run-id>_cl_comparison.csv` lists these values side by side.
+
+Every strategy starts from the same seed. The positive-class weight (`--pos-weight-from-train`) is computed once from the full training split and shared by all strategies.
 
 ## Outputs
 
-Each strategy writes its own run folder. The strategy name is appended to the base run id. Each run contains:
+Each strategy writes `<output-folder>/<run-id>_<strategy>/`:
 
-- `config.yaml`: the exact resolved configuration.
-- `output.log`: training and evaluation log.
-- `models/<strategy>_best.pth`: stable alias for the best model state.
-- `models/last.ckpt`: final resumable checkpoint payload for inspection.
-- `cl_results.json`: validation history, task definitions, and task-by-task evaluation matrix.
+- `config.yaml` — resolved configuration;
+- `output.log` — training and evaluation log;
+- `models/after_task_<t>.pth` — model after each task;
+- `models/<strategy>_final.pth` — model after the last task (`<strategy>_best.pth` is the same file, kept for older commands);
+- `models/last.ckpt` — resumable state (model, optimiser, scheduler, AMP scaler, replay buffer, RNG state, progress);
+- `cl_results.json` — protocol, task definitions, threshold selection, validation history, task matrix and summary.
 
 ## Example command
 
@@ -30,68 +52,92 @@ floodmap continual-train \
   --config configs/train_segmentation_vv_vh_dem.yaml \
   --processed-data-dir "$PROCESSED_DIR" \
   --output-folder "$ARTIFACTS_DIR" \
-  --run-id flood_512_r50_cl \
+  --run-id flood_512_cl \
   --activations-json-path "$SUMMARY_FILE" \
-  --strategies random least_confidence margin entropy \
+  --strategies finetune random least_confidence entropy hybrid joint \
   --task-year-ranges 2014-2017 2018-2019 2020-2021 \
   --epochs-per-task 5 \
   --replay-buffer-size 100 \
   --replay-batch-size 16 \
-  --uncertainty-subset-fraction 1.0 \
   --architecture unet \
-  --backbone resnet50 \
+  --backbone resnet34 \
   --pretrained \
   --image-size 512 \
   --batch-size 8 \
-  --num-workers 0 \
+  --num-workers 2 \
   --input-modalities vv vh dem \
-  --normalization-mode robust_percentile \
+  --normalization-mode robust_minmax \
   --normalization-stats-path "$STATS_FILE" \
   --loss bce_tversky \
-  --loss-alpha 0.30 \
-  --loss-beta 0.70 \
-  --bce-weight 0.5 \
-  --tversky-weight 0.5 \
   --pos-weight-from-train \
-  --pos-weight-max 20 \
   --augmentation-profile composite \
   --threshold-sweep \
   --threshold-metric f1 \
-  --metric-mode global \
-  --no-amp \
-  --gpu \
-  --progress \
-  --plain-progress
-```
-
-For full-raster task evaluation on the test split, add:
-
-```bash
   --cl-eval-split test \
   --cl-eval-inference-mode sliding_window \
   --window-size 512 \
   --window-overlap 128 \
-  --window-batch-size 1
+  --gpu --amp \
+  --plain-progress
 ```
 
-Validation is the default task-evaluation split because it is faster and uses the same 512-sized tiles as training. Test split evaluation is supported but can be slower when sliding-window inference is required.
+`--cl-eval-split val` (default) is faster and is the right choice while developing; use `test` with `sliding_window` once for the final comparison. `joint` trains on all seen data, so its later tasks take longer than the other strategies.
 
-## v061 additions
+## Task splits
 
-`continual-train` supports two model modes:
+- **By year** (default): `--task-split year --task-year-ranges 2014-2017 2018-2019 2020-2021`, from the event start
+  date in `activations.json`.
+- **By region**: `--task-split region --task-regions europe asia+americas+africa+oceania`, from the event country
+  (or its lat/lon when the country is missing). Regions are `europe`, `asia`, `africa`, `americas`, `oceania`; join
+  them with `+` to merge small regions into one task.
 
-- `--cl-model-mode single`: trains one model per replay strategy.
-- `--cl-model-mode ensemble`: trains one model per listed ensemble member and then evaluates the member checkpoints as an ensemble on the validation split.
+Add `--cl-dry-run` to print each task's tiles, events and countries without training. On MMFlood, Asia alone has
+54 training tiles and one test event, which is too small to measure forgetting, so it is merged into the second task.
 
-Example ensemble members use `decoder:encoder[:label]`:
+## Results on MMFlood
 
-```bash
---cl-model-mode ensemble \
---ensemble-members unet:resnet50 deeplabv3p:resnet50 \
---ensemble-method mean_logit
-```
+U-Net ResNet34, VV+VH, 5 epochs per task, replay batch 8, fixed threshold 0.80, test split. "Final F1" is the mean
+over tasks after the last task; "forgetting" is the drop on earlier tasks.
 
-The CL metrics are global pixel-level threshold-sweep metrics. For every mixed-validation evaluation and task-specific evaluation, the command records F1, IoU, precision, recall, MCC, empty-tile false-positive rate and non-empty tile recall. It also writes a `cl_summary` with mean final task score, mean plasticity and mean forgetting derived from the task evaluation matrix.
+**Region split** (Europe → rest of world), buffer 100, seeds 42, 1 and 2 (mean ± std):
+
+| strategy | final F1 | plasticity | forgetting |
+|---|---|---|---|
+| finetune | 0.491 ± 0.009 | 0.505 ± 0.003 | 0.028 ± 0.015 |
+| hybrid | 0.504 ± 0.019 | 0.507 ± 0.018 | 0.007 ± 0.009 |
+| joint | 0.536 ± 0.005 | 0.533 ± 0.002 | 0.003 ± 0.005 |
+
+Hybrid rehearsal had lower forgetting and a higher final F1 than fine-tuning in each of the three seeds; with three
+seeds the forgetting difference is suggestive rather than statistically significant. Joint training was best in every
+seed, mainly through better adaptation to the second task. Random and entropy replay (seed 42 only) reached 0.506 and
+0.505 final F1 with forgetting 0.025 and 0.013.
+
+**Buffer size** (hybrid, region split, seed 42): 50 tiles → 0.533 final F1, forgetting 0.003; 100 → 0.523, 0.000;
+150 → 0.535, 0.000. Buffer size had no consistent effect in this range; the differences are smaller than the
+variation between seeds.
+
+**Year split** (2014–17, 2018–19, 2020–21), buffer 100, seed 42:
+
+| strategy | final F1 | forgetting | backward transfer |
+|---|---|---|---|
+| finetune | 0.460 | 0.009 | 0.057 |
+| random | 0.441 | 0.015 | 0.045 |
+| entropy | 0.451 | 0.003 | 0.056 |
+| hybrid | 0.446 | 0.003 | 0.059 |
+| joint | 0.449 | 0.000 | 0.051 |
+
+Forgetting across years is negligible for every strategy, and later tasks improve earlier ones (positive backward
+transfer). Changes of about ±0.01 occur even for joint training, so differences of that size are noise.
+
+`scripts/aggregate_cl_runs.py` combines repeated runs into mean ± std tables.
+
+## Resuming
+
+`--resume` continues every strategy (and ensemble member) from its own `models/last.ckpt`, including a task whose training finished but whose evaluation did not. A finished strategy is skipped, and a strategy with no checkpoint yet starts from the beginning, so it is safe to always pass `--resume`. `--resume-from PATH` loads one specific checkpoint and is only allowed with a single strategy in single-model mode; a bare `.pth` also needs `--resume-start-task`.
+
+## Ensembles
+
+`--cl-model-mode ensemble --ensemble-members unet:resnet34 deeplabv3p:resnet34` trains one model per member for each strategy, then evaluates the members **together** after each task (`--ensemble-method mean_logit|mean_prob`) with the same threshold protocol. Results are in `<run-id>_<strategy>_ensemble/cl_ensemble_results.json`.
 
 ## Model comparison
 
@@ -114,7 +160,7 @@ floodmap compare-models \
   --processed-data-dir "$PROCESSED_DIR" \
   --split val \
   --input-modalities vv vh dem \
-  --normalization-mode robust_percentile \
+  --normalization-mode robust_minmax \
   --normalization-stats-path "$STATS_FILE" \
   --metric-mode global \
   --threshold-metric f1 \

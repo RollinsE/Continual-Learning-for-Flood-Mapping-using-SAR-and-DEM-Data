@@ -13,10 +13,10 @@ reserved for checkpoint selection and comparison.
 
 ```bash
 floodmap mine-hard-negatives \
-  --config $ARTIFACTS_DIR/flood_baseline_512_20260713_194723/config.yaml \
-  --checkpoint $ARTIFACTS_DIR/flood_baseline_512_20260713_194723/models/model-020_best_f1-0.4941.pth \
+  --config $ARTIFACTS_DIR/baseline_run/config.yaml \
+  --checkpoint $ARTIFACTS_DIR/baseline_run/models/<best-checkpoint>.pth \
   --processed-data-dir $PROCESSED_DIR \
-  --output-dir $ARTIFACTS_DIR/baseline_train_hard_negative_regions_v084 \
+  --output-dir $ARTIFACTS_DIR/baseline_train_hard_negative_regions \
   --split train \
   --image-size 512 \
   --batch-size 8 \
@@ -47,15 +47,15 @@ resets the optimiser, scheduler, epoch counter, and early-stopping state.
 
 ```bash
 floodmap train \
-  --config $ARTIFACTS_DIR/flood_baseline_512_20260713_194723/config.yaml \
+  --config $ARTIFACTS_DIR/baseline_run/config.yaml \
   --processed-data-dir $PROCESSED_DIR \
   --artifacts-dir $ARTIFACTS_DIR \
-  --run-id flood_baseline_hard_negative_regions_v084 \
-  --init-checkpoint $ARTIFACTS_DIR/flood_baseline_512_20260713_194723/models/model-020_best_f1-0.4941.pth \
+  --run-id flood_baseline_hard_negative_regions \
+  --init-checkpoint $ARTIFACTS_DIR/baseline_run/models/<best-checkpoint>.pth \
   --no-resume \
   --no-pretrained \
   --hard-negative-region-sampling \
-  --hard-negative-manifest $ARTIFACTS_DIR/baseline_train_hard_negative_regions_v084/hard_negative_regions.csv \
+  --hard-negative-manifest $ARTIFACTS_DIR/baseline_train_hard_negative_regions/hard_negative_regions.csv \
   --hard-negative-region-weight 1.25 \
   --hard-negative-region-max-fraction 0.42 \
   --hard-negative-crop-probability 0.50 \
@@ -78,6 +78,6 @@ floodmap train \
 ```
 
 The controlled objective is to reduce false-positive pixels and poor-overlap
-errors without losing the baseline's flood recall. The benchmark remains
-validation F1 `0.4941`; component filtering at threshold `0.50` and minimum area
-`64` is evaluated after training, not baked into the loss.
+errors without losing the baseline's flood recall. Compare against the baseline's
+validation F1 at the same threshold; component filtering (for example threshold
+`0.50`, minimum area `64`) is evaluated after training, not built into the loss.

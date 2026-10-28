@@ -23,7 +23,7 @@ def test_balanced_event_folds_are_disjoint_and_deterministic():
 
 
 
-def test_event_cv_completion_marker_validation_supports_successful_legacy_runs():
+def test_event_cv_completion_marker_accepts_successful_markers_without_status():
     assert _cv_result_is_complete({
         "result": {"stop_reason": "completed"},
     })
@@ -284,7 +284,7 @@ def test_event_cv_interruption_does_not_create_completion_marker(tmp_path, monke
     assert not (output_dir / "cv_results.csv").exists()
 
 
-def test_event_cv_repairs_legacy_interrupted_marker_and_resumes(tmp_path, monkeypatch):
+def test_event_cv_repairs_interrupted_marker_without_status_and_resumes(tmp_path, monkeypatch):
     import json
     import sys
     import types

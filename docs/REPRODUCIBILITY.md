@@ -1,4 +1,4 @@
-# Reproducing the locked reference workflow
+# Reproducing the reference workflow
 
 This document separates the reproducible reference protocol from exploratory and diagnostic commands. Do not alter the test split, model, threshold, or post-processing after viewing the test result.
 
@@ -40,7 +40,7 @@ floodmap preprocess \
   --log-file "$PROCESSED_DIR/preprocess.log"
 ```
 
-Reference split counts after preprocessing were 3,981 training tiles, 324 validation tiles, and 386 test tiles. A different count means the data release, split metadata, preprocessing inputs, or filtering differ from the reference run.
+Reference split counts after preprocessing are 3,980 training tiles, 324 validation tiles and 386 test scenes. A different count means the data release, split metadata, preprocessing inputs or filtering differ from the reference run.
 
 ## 4. Audit the processed dataset
 
@@ -99,7 +99,7 @@ floodmap calibrate-event-cv \
   --log-file "$ARTIFACTS_DIR/event_cv_calibration/output.log"
 ```
 
-The locked reference threshold is `0.80`. Its out-of-fold event-macro F1 was approximately `0.4200` across 54 training events.
+The reference threshold is `0.80`, with an out-of-fold event-macro F1 of `0.424` (folds 0 and 1).
 
 ## 7. Train the final model
 
@@ -147,7 +147,7 @@ floodmap train \
   --log-file "$ARTIFACTS_DIR/final_unet_resnet34_vv_vh/output.log"
 ```
 
-The reference run selected the epoch-4 checkpoint with validation F1 `0.4596` at threshold `0.80`. A new run may select another epoch; use its highest locked-threshold validation checkpoint rather than copying the historical filename.
+The reference run selected the epoch-6 checkpoint. A new run may select another epoch; use the checkpoint with the highest validation F1 at the operating threshold.
 
 For a genuine interruption, rerun the same command with `--resume` only after the run directory contains `config.yaml` and `models/last.ckpt`.
 
@@ -170,22 +170,23 @@ floodmap evaluate \
   --thresholds 0.80 \
   --threshold-metric f1 \
   --metric-mode global \
+  --inference-mode sliding_window \
+  --window-size 512 \
+  --window-overlap 128 \
   --plain-progress \
   --heartbeat-seconds 30 \
-  --log-file "$ARTIFACTS_DIR/final_unet_resnet34_vv_vh/test_evaluation_t080.log"
+  --log-file "$ARTIFACTS_DIR/final_unet_resnet34_vv_vh/test_evaluation.log"
 ```
 
-Reference test metrics:
+Reference test metrics (sliding-window inference, 512 px windows with 128 px overlap, threshold 0.80):
 
 | Metric | Value |
 |---|---:|
-| F1 | 0.5471 |
-| IoU | 0.3765 |
-| Precision | 0.4528 |
-| Recall | 0.6909 |
-| MCC | 0.5358 |
-| Empty-tile false-positive rate | 0.0000 |
-| Non-empty tile recall | 0.9870 |
+| F1 | 0.520 |
+| IoU | 0.351 |
+| Precision | 0.439 |
+| Recall | 0.637 |
+| MCC | 0.508 |
 
 ## 9. What must be reported
 

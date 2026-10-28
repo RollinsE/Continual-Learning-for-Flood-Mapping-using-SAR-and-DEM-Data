@@ -5,7 +5,7 @@ from floods.models.architectures.deeplabv3_plus import DeepLab, Xception
 from floods.models.architectures.unet import UNet
 
 
-def test_legacy_unet_uses_professional_block_names_and_preserves_output_shape():
+def test_unet_uses_descriptive_block_names_and_preserves_output_shape():
     model = UNet(num_classes=1, in_channels=2).eval()
     image = torch.randn(1, 2, 65, 67)
     with torch.no_grad():

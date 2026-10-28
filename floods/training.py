@@ -166,6 +166,10 @@ def train(config: TrainConfig):
     use_rgb = configured_modalities[:3] == ["r", "g", "b"] if configured_modalities else (config.data.in_channels - int(config.data.include_dem)) == 3
     train_set, valid_set = prepare_datasets(config=config, use_rgb=use_rgb)
     LOG.info("Dataset ready: train samples: %d | validation samples: %d", len(train_set), len(valid_set))
+    if resume_checkpoint is None:
+        # prepare_datasets resolves dataset-dependent settings (SAR units, modalities,
+        # normalisation stats path); re-save so config.yaml records what training used.
+        store_config(config, path=config_path)
 
     try:
         accelerator = Accelerator(mixed_precision="fp16" if config.trainer.amp else "no", cpu=config.trainer.cpu)

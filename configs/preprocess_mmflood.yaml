@@ -17,6 +17,9 @@ colorize: false
 clip_dem: true
 morphology: true
 morph_kernel: 5
+morphology_splits:
+- train
+overwrite_existing: false
 nan_threshold: 0.75
 mask_flood_values:
 - 1

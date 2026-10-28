@@ -237,14 +237,19 @@ def load_normalization_stats(path: Path, input_modalities: Sequence[str], mode: 
     by_channel = {str(item["channel"]).lower(): item for item in payload.get("channels", [])}
     means, stds, clip_min, clip_max = [], [], [], []
     mode = str(mode or "stats").lower()
+    if mode in {"robust_percentile", "notebook_robust"}:
+        LOG.warning(
+            "normalization_mode=%s is not recommended. "
+            "It standardises [0, 1]-scaled channels with raw-unit mean/std, which inflates SAR and "
+            "almost removes DEM variation. Use robust_minmax for new training runs.", mode)
     for channel in canonicalize_modalities(input_modalities):
         if channel not in by_channel:
             raise KeyError(f"Normalization stats file {path} has no channel '{channel}'. Available: {sorted(by_channel)}")
         item = by_channel[channel]
-        if mode in {"robust_percentile", "note" + "book_robust"}:
+        if mode in {"robust_percentile", "notebook_robust"}:
             # Robust percentile mode: min-max scale each clipped channel to [0, 1],
             # then normalize using the fitted training mean and standard deviation.
-            # Older stats files fall back to clipped mean/std so they remain loadable.
+            # Stats files without raw_mean/raw_std fall back to mean/std.
             means.append(float(item.get("raw_mean", item.get("mean", 0.5))))
             stds.append(float(item.get("raw_std", item.get("std", 0.5))))
         elif mode == "robust_minmax":

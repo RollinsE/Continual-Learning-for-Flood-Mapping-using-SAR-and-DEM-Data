@@ -77,8 +77,8 @@ def test_summary_report_inline_fragment_is_scoped_and_document_free(tmp_path: Pa
 
 
 
-def test_legacy_report_global_css_is_scoped_before_inline_display():
-    legacy = """<!doctype html>
+def test_report_global_css_is_scoped_before_inline_display():
+    report = """<!doctype html>
 <html><head><style>
 :root { --panel: #fff; }
 * { box-sizing: border-box; }
@@ -89,8 +89,8 @@ pre { background: #f6f8fa; }
   body { margin: 12px; }
   th, td { display: block; }
 }
-</style></head><body><h1>Legacy report</h1><pre>metadata</pre></body></html>"""
-    fragment = _notebook_safe_report_fragment(legacy)
+</style></head><body><h1>Report</h1><pre>metadata</pre></body></html>"""
+    fragment = _notebook_safe_report_fragment(report)
 
     assert "<div class='floodmap-notebook-report'>" in fragment
     assert ".floodmap-notebook-report pre" in fragment

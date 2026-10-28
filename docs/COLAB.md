@@ -1,5 +1,7 @@
 # Colab usage
 
+The easiest route is [`notebooks/colab_pipeline.ipynb`](../notebooks/colab_pipeline.ipynb): set the paths in its first cell and run the cells in order. It installs the code from the repository zip, restores or builds the processed tiles (keeping a zip copy on Drive), runs the smoke test and every pipeline step, and can be re-run after a disconnect. The rest of this page describes the same steps by hand.
+
 This document uses environment variables rather than embedded user-specific paths. Set them once at the top of the notebook.
 
 ```python
@@ -23,7 +25,7 @@ Always move to `/content` before deleting or replacing the repository. This prev
 ```bash
 cd /content
 rm -rf "$PROJECT_ROOT"
-unzip -q /content/flood_extent_mapping_v<version>.zip -d /content
+unzip -q /content/flood_extent_mapping.zip -d /content
 cd "$PROJECT_ROOT"
 bash scripts/install_colab.sh
 ```
@@ -62,8 +64,7 @@ floodmap preprocess \
   --scale 1 \
   --tile-size 256 \
   --tile-max-overlap 128 \
-  --sar-transform log1p \
-  --no-decibel \
+  --sar-transform db10 \
   --clip-dem \
   --morphology \
   --morph-kernel 5 \
@@ -77,6 +78,8 @@ floodmap preprocess \
 ```
 
 Use `--tile-size 128`, `--tile-size 256`, or `--tile-size 512`; set training `--image-size` to the same value.
+
+SAR tiles are written in dB with no-data as NaN, and morphology is applied to training masks only (see `docs/DATA.md`). Use a new `--processed-data-dir`, or add `--overwrite-existing` to rebuild an existing folder. Run `python scripts/pipeline_smoke_test.py --clean` first; it takes a few minutes on CPU.
 
 Run dataset audit after preprocessing:
 
@@ -124,11 +127,11 @@ The model process itself must remain a normal CLI command:
 
 ```bash
 floodmap train \
-  --config "$ARTIFACTS_DIR/flood_baseline_512_20260713_194723/config.yaml" \
+  --config "$ARTIFACTS_DIR/baseline_run/config.yaml" \
   --processed-data-dir "$PROCESSED_DIR" \
   --artifacts-dir "$ARTIFACTS_DIR" \
-  --run-id flood_groupdro_resnet50_amp_recovery_v094 \
-  --init-checkpoint "$ARTIFACTS_DIR/flood_baseline_512_20260713_194723/models/model-020_best_f1-0.4941.pth" \
+  --run-id flood_groupdro_resnet50_amp_recovery \
+  --init-checkpoint "$ARTIFACTS_DIR/baseline_run/models/<best-checkpoint>.pth" \
   --epochs 25 \
   --patience 8 \
   --batch-size 8 \

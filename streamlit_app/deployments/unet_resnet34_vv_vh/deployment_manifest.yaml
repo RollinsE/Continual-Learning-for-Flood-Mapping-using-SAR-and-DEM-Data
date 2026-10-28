@@ -17,6 +17,7 @@ inputs:
   - vv
   - vh
   normalization_mode: robust_percentile
+  sar_units: log1p
   normalization_stats_path: assets/normalization/normalization_stats.json
   sar_contract: Analysis-ready GeoTIFF. Either one file with VV band 1 and VH band
     2, or paired VV/VH files discovered from a scene folder.

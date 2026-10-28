@@ -112,10 +112,29 @@ def is_colab_runtime() -> bool:
     return any(bool(os.environ.get(name)) for name in markers) or "google.colab" in sys.modules
 
 
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+PROGRESS_COLOUR = "green"
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in _TRUE_VALUES
+
+
+def dynamic_progress_forced() -> bool:
+    """True when the user asked for live tqdm bars (``--dynamic-progress`` / FLOODMAP_DYNAMIC_PROGRESS=1).
+
+    Colab renders carriage-return bars from ``!`` and ``%%bash`` cells even though
+    the stream is not a TTY, so forcing is safe there.
+    """
+    return _env_flag("FLOODMAP_DYNAMIC_PROGRESS") and not _env_flag("FLOODMAP_PLAIN_PROGRESS")
+
+
 def dynamic_progress_supported(stream: Optional[TextIO] = None) -> bool:
     """Whether carriage-return progress bars are suitable for this console."""
-    if os.environ.get("FLOODMAP_PLAIN_PROGRESS", os.environ.get("MMFLOOD_PLAIN_PROGRESS", "")).strip().lower() in {"1", "true", "yes", "on"}:
+    if _env_flag("FLOODMAP_PLAIN_PROGRESS") or _env_flag("MMFLOOD_PLAIN_PROGRESS"):
         return False
+    if dynamic_progress_forced():
+        return True
     stream = stream or sys.stdout
     try:
         is_tty = bool(stream.isatty())
@@ -127,6 +146,15 @@ def dynamic_progress_supported(stream: Optional[TextIO] = None) -> bool:
 def progress_logging_context():
     """Redirect logging through tqdm only when dynamic bars are actually used."""
     return logging_redirect_tqdm() if dynamic_progress_supported() else nullcontext()
+
+
+class _ActivityTqdm(tqdm):
+    """tqdm bar that also marks work activity, so heartbeat messages stay quiet while it advances."""
+
+    def __iter__(self):
+        for item in super().__iter__():
+            note_work_activity()
+            yield item
 
 
 class LineProgress(Iterable[Any]):
@@ -265,18 +293,34 @@ def progress_iter(
     file: Optional[TextIO] = None,
     postfix: Optional[Mapping[str, Any]] = None,
 ):
-    """Return a dynamic tqdm bar or a newline-based progress iterable."""
+    """Return a dynamic tqdm bar or a newline-based progress iterable.
+
+    All dynamic bars use one colour (``PROGRESS_COLOUR``, green); the ``colour``
+    argument is accepted for compatibility.
+    """
+    del colour
     stream = file or sys.stdout
+    forced = dynamic_progress_forced()
     if dynamic_progress_supported(stream):
-        return tqdm(
+        try:
+            is_tty = bool(stream.isatty())
+        except Exception:
+            is_tty = False
+        return _ActivityTqdm(
             iterable,
             total=total,
             desc=desc,
             unit=unit,
             disable=disable,
-            colour=colour,
+            colour=PROGRESS_COLOUR,
             file=stream,
             postfix=dict(postfix or {}),
+            # Non-TTY outputs (Colab cells) cannot report a width; refresh at most once a second.
+            # Forced bars (Colab) and non-TTY outputs refresh at most once a second
+            # with a fixed width, so long runs do not flood notebook output.
+            ncols=None if (is_tty and not forced) else 110,
+            dynamic_ncols=is_tty and not forced,
+            mininterval=1.0 if (forced or not is_tty) else 0.1,
         )
     line_progress = LineProgress(
         iterable,

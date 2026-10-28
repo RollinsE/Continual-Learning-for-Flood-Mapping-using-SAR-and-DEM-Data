@@ -38,9 +38,9 @@ def _deployment_manifests() -> list[Path]:
     if configured:
         return [Path(configured).expanduser().resolve()]
     manifests = sorted((APP_DIR / "deployments").glob("*/deployment_manifest.yaml"))
-    legacy = APP_DIR / "deployment" / "deployment_manifest.yaml"
-    if legacy.is_file():
-        manifests.append(legacy)
+    single_bundle = APP_DIR / "deployment" / "deployment_manifest.yaml"
+    if single_bundle.is_file():
+        manifests.append(single_bundle)
     # Preserve order while removing duplicates.
     return list(dict.fromkeys(path.resolve() for path in manifests if path.is_file()))
 
@@ -326,6 +326,13 @@ sar_uploads = st.file_uploader(
     accept_multiple_files=True,
     help="Select one or more SAR GeoTIFFs. You do not need to declare whether a file contains one band or a combined VV/VH pair.",
 )
+_unit_labels = {"Detect automatically": "auto", "Linear power (σ⁰/γ⁰)": "linear", "Decibels (dB)": "db"}
+st.session_state["floodmap_sar_units"] = _unit_labels[st.radio(
+    "SAR backscatter units",
+    list(_unit_labels),
+    horizontal=True,
+    help="Uploads are converted to the units the model was trained on. Zero/NaN/no-data pixels are treated as missing.",
+)]
 
 needs_dem = _needs_dem(manifest_summary["modalities"])
 if needs_dem:
@@ -425,6 +432,7 @@ if run_clicked and sar_uploads:
                 write_html_report=True,
                 display_inline=False,
                 output_mode="concise",
+                input_sar_units=st.session_state.get("floodmap_sar_units", "auto"),
             )
             predictions = summary.get("predictions") or []
             mosaic = build_collection_mosaic(predictions, output_dir / "collection") if len(predictions) > 1 else {
