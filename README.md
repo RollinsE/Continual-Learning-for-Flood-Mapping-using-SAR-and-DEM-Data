@@ -47,6 +47,7 @@ large water body that the flood labels do not include (probably permanent water)
 - Each channel is clipped to robust percentiles, scaled to [0, 1] and standardised with train-fitted statistics (`robust_minmax`).
 - Augmentation is SAR-aware: radiometric jitter is additive in dB, blurring preserves physical units, and rotation corners and cut-out holes are excluded from the loss.
 - Deployment accepts linear or dB backscatter, converts it to the training units and writes no-data as 255.
+- Deployment can remove permanent water (JRC Global Surface Water, water at least 50% of the time) before thresholding; see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#permanent-water-mask).
 
 Run `python scripts/pipeline_smoke_test.py` (a few minutes on CPU) before any long job.
 

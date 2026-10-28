@@ -16,6 +16,20 @@ Upload VV/VH backscatter as **linear power** (σ⁰ or γ⁰, e.g. Sentinel-1 RT
 
 Pixels with no SAR data (0, NaN or the raster's nodata value) and DEM voids are not predicted. They are written as `255` (declared nodata) in the flood mask and as NaN in the probability raster, and they are excluded from flood area, flood fraction and labelled-scene metrics. Two-band files are read as band 1 = VV, band 2 = VH unless the band descriptions say VH, VV.
 
+## Permanent-water mask
+
+Flood labels mark water that is present because of the flood; lakes, reservoirs and rivers count as background. The model
+detects open water of any kind, so permanent water is its most common false positive. `predict-scene
+--permanent-water-mask` reads the JRC Global Surface Water occurrence layer (1984-2020, hosted by Microsoft Planetary
+Computer) onto the scene grid and sets pixels recorded as water at least `--permanent-water-threshold` percent of the time
+(default 50) to background before thresholding. The Streamlit app does this by default ("Remove permanent water").
+
+On the validation split at threshold 0.80 the mask raised F1 from 0.430 to 0.461 (precision 0.447 to 0.534, recall 0.413
+to 0.406); only 2.6% of the masked pixels were labelled flood. The mask needs an internet connection. If the layer cannot
+be read, the prediction is written unmasked and the reason is recorded under `permanent_water` in the prediction metadata.
+Because the layer covers 1984-2020, it includes years after older flood events; for water present at least half the time
+this has little effect, but it should be noted when reporting results.
+
 ## Export a portable deployment bundle
 
 `export-deployment` creates a self-contained directory by default. The manifest, model checkpoint, resolved training configuration and normalization statistics are kept together, and the manifest uses paths relative to itself rather than machine-specific locations.
