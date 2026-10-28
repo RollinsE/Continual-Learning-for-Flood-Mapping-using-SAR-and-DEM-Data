@@ -131,6 +131,12 @@ transfer). Changes of about ±0.01 occur even for joint training, so differences
 
 `scripts/aggregate_cl_runs.py` combines repeated runs into mean ± std tables.
 
+`scripts/analyse_cl_runs.py` analyses finished runs without retraining. `metrics` lists precision, recall and F1 per
+strategy and task (right after training on the task and after the last task, so forgetting can be split into lost recall
+and lost precision) and the training time of each strategy. `replay` rebuilds each replay buffer exactly, scores the
+buffered tiles with the models saved at the start and end of each task, and reports how much flood each strategy
+replays compared with uniform sampling.
+
 ## Resuming
 
 `--resume` continues every strategy (and ensemble member) from its own `models/last.ckpt`, including a task whose training finished but whose evaluation did not. A finished strategy is skipped, and a strategy with no checkpoint yet starts from the beginning, so it is safe to always pass `--resume`. `--resume-from PATH` loads one specific checkpoint and is only allowed with a single strategy in single-model mode; a bare `.pth` also needs `--resume-start-task`.
