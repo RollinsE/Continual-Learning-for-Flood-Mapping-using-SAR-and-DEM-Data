@@ -74,9 +74,14 @@ def print_table(rows: List[dict], columns: List[str]) -> None:
 
 
 def training_seconds(runs_dir: Path, run_id: str) -> Dict[str, float]:
-    """Longest 'CL <strategy> completed in Xs' per strategy in the run log (resumed runs log ~0 s)."""
+    """Longest 'CL <strategy> completed in Xs' per strategy, from this run's own logs only.
+
+    A resumed strategy only logs the time of its last session, so its value understates
+    the total; compare times from runs that finished in one session.
+    """
     seconds: Dict[str, float] = {}
-    for log in [runs_dir / f"{run_id}.log"] + sorted(runs_dir.glob(f"{run_id}_*/output.log")):
+    logs = [runs_dir / f"{run_id}.log"] + [runs_dir / f"{run_id}_{s}" / "output.log" for s in STRATEGIES]
+    for log in logs:
         if not log.is_file():
             continue
         for match in re.finditer(r"CL (\w+) completed in ([\d.]+)s", log.read_text(encoding="utf-8", errors="ignore")):
