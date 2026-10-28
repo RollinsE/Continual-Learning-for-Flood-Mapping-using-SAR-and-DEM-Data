@@ -25,7 +25,8 @@ Computer) onto the scene grid and sets pixels recorded as water at least `--perm
 (default 50) to background before thresholding. The Streamlit app does this by default ("Remove permanent water").
 
 On the validation split at threshold 0.80 the mask raised F1 from 0.430 to 0.461 (precision 0.447 to 0.534, recall 0.413
-to 0.406); only 2.6% of the masked pixels were labelled flood. The mask needs an internet connection. If the layer cannot
+to 0.406); only 2.6% of the masked pixels were labelled flood. Applied once to the test split, it raised F1 from 0.520 to
+0.549. The mask needs an internet connection. If the layer cannot
 be read, the prediction is written unmasked and the reason is recorded under `permanent_water` in the prediction metadata.
 Because the layer covers 1984-2020, it includes years after older flood events; for water present at least half the time
 this has little effect, but it should be noted when reporting results.

@@ -31,8 +31,9 @@ The deployed model is a U-Net with an ImageNet-pretrained ResNet34 encoder and S
 | Test precision | 0.439 |
 | Test recall | 0.637 |
 | Test MCC | 0.508 |
+| Test F1 with permanent-water mask | **0.549** |
 
-Test metrics are pooled over all pixels of the held-out test split with the published labels. They are not a general estimate of performance on every flood event or location. See [`MODEL_CARD.md`](MODEL_CARD.md) and [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) for the evaluation setup and limitations.
+Test metrics are pooled over all pixels of the held-out test split with the published labels. The permanent-water mask (JRC Global Surface Water, water at least 50% of the time, set to background before thresholding) was chosen on the validation split and then applied once to the test split. They are not a general estimate of performance on every flood event or location. See [`MODEL_CARD.md`](MODEL_CARD.md) and [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) for the evaluation setup and limitations.
 
 ![Ground truth, prediction and error map for one Sentinel-1 scene](docs/images/example_evaluation.jpg)
 
