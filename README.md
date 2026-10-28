@@ -1,5 +1,7 @@
 # Flood Extent Mapping
 
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://flood-extent-mapping.streamlit.app/)
+
 Flood Extent Mapping is a modular Python pipeline for training, evaluating and deploying flood-segmentation models using Sentinel-1 SAR and DEM data. It supports standard training and continual-learning experiments, event-level cross-validation, several model and pretraining options, detailed error analysis, portable deployment bundles and a Streamlit app for running predictions on new scenes.
 
 The reference deployment uses Sentinel-1 VV and VH. DEM and derived terrain features are supported where the selected model requires them, so the package is not tied to a single input combination.
@@ -182,6 +184,8 @@ floodmap predict-scene \
 ```
 
 ## Streamlit app
+
+A hosted version runs at **[flood-extent-mapping.streamlit.app](https://flood-extent-mapping.streamlit.app/)**. It runs on CPU, so large scenes take a while, and after 12 hours without visitors it sleeps; the first visitor then wakes it, which takes about a minute.
 
 The app in `streamlit_app/` uses the same `floods.deployment.predict_scene()` function as the CLI. It adds file upload, automatic tile matching and result display; it does not maintain a separate inference implementation.
 
