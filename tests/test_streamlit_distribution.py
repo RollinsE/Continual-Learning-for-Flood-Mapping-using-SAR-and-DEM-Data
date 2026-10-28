@@ -68,3 +68,11 @@ def test_streamlit_explains_collection_nodata_coverage():
     report_text = Path("streamlit_app/collection.py").read_text(encoding="utf-8")
     assert "grey = no input coverage" in app_text
     assert "grey = no input coverage" in report_text
+
+
+def test_streamlit_can_clear_results_and_uploads():
+    source = APP_PATH.read_text(encoding="utf-8")
+    assert "Clear results and uploads" in source
+    assert "on_click=_reset_session" in source
+    for widget in ("floodmap_sar_uploads_", "floodmap_dem_uploads_", "floodmap_mask_uploads_"):
+        assert f'key=f"{widget}{{upload_round}}"' in source

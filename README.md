@@ -32,6 +32,12 @@ The deployed model is a U-Net with an ImageNet-pretrained ResNet34 encoder and S
 
 Test metrics are pooled over all pixels of the held-out test split with the published labels. They are not a general estimate of performance on every flood event or location. See [`MODEL_CARD.md`](MODEL_CARD.md) and [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) for the evaluation setup and limitations.
 
+![Ground truth, prediction and error map for one Sentinel-1 scene](docs/images/example_evaluation.jpg)
+
+*Example scene from MMFlood event EMSR107. The model detects open water, but most of the water it finds here is a
+large water body that the flood labels do not include (probably permanent water), so it counts as false positives
+(red). Flooded fringes with a weaker SAR signature are partly missed (blue). Contains modified Copernicus Sentinel data.*
+
 ## Data conventions
 
 - SAR backscatter is stored in dB. No-data (zero or non-finite SAR, DEM voids) is kept as NaN and ignored in losses and metrics.
@@ -180,6 +186,13 @@ floodmap predict-scene \
 The app in `streamlit_app/` uses the same `floods.deployment.predict_scene()` function as the CLI. It adds file upload, automatic tile matching and result display; it does not maintain a separate inference implementation.
 
 It can process one SAR tile or a collection of tiles, recognise supported SAR layouts, match DEM and optional masks by tile ID, show per-tile outputs and build a whole-area mosaic after inference.
+
+![Streamlit app: model details and file upload](docs/images/app_inputs.png)
+
+![Streamlit app: whole-area flood mask and probability](docs/images/app_results.png)
+
+Results stay on the page until the next run; **Clear results and uploads** removes them together with the uploaded files.
+
 
 ```bash
 python -m pip install -r streamlit_app/requirements.txt
