@@ -1247,6 +1247,11 @@ def build_cli_parser() -> argparse.ArgumentParser:
     pred_p = sub.add_parser("predict-scene", help="Run deployment inference on a direct SAR/DEM scene or a folder with multiple SAR acquisitions.")
     pred_p.add_argument("--input-sar-units", choices=["auto", "linear", "db"], default="auto",
                         help="Units of the uploaded VV/VH backscatter. auto detects linear power vs dB; inputs are converted to the units the model was trained on.")
+    pred_p.add_argument("--permanent-water-mask", action="store_true", default=False,
+                        help="Set pixels that the JRC Global Surface Water layer records as water at least "
+                             "--permanent-water-threshold %% of the time to background (needs internet access).")
+    pred_p.add_argument("--permanent-water-threshold", type=int, default=50,
+                        help="JRC occurrence percentage treated as permanent water (default 50).")
     pred_p.add_argument("--manifest", required=True, type=Path, help="Deployment manifest from export-deployment.")
     pred_p.add_argument("--sar-path", type=Path, help="Input two-band SAR GeoTIFF. Expected band 1=VV and band 2=VH.")
     pred_p.add_argument("--scene-dir", type=Path, help="Folder containing one or more deployable SAR files. Use discover-scene to inspect it first.")
@@ -1833,7 +1838,8 @@ def _dispatch_command(args: argparse.Namespace, parser: argparse.ArgumentParser)
                       window_blend=args.window_blend,
                       output_mode=args.output_mode,
                       prediction_only=args.prediction_only,
-                      input_sar_units=args.input_sar_units)
+                      input_sar_units=args.input_sar_units,
+                      permanent_water_threshold=args.permanent_water_threshold if args.permanent_water_mask else None)
         return
     
     if args.command == "export-deployment":

@@ -29,6 +29,8 @@ On the 386 test scenes with the published labels, sliding-window inference (512 
 | Recall | 0.637 |
 | MCC | 0.508 |
 
+With the permanent-water mask applied before thresholding (JRC Global Surface Water occurrence ≥ 50%), test F1 is **0.549**. The mask was selected on the validation split (F1 0.430 → 0.461) and evaluated once on the test split.
+
 Metrics are pooled over all test pixels. They vary considerably between events and between areas of the same event.
 
 ## Intended use
@@ -38,7 +40,7 @@ Research, benchmarking, and decision-support workflows where model outputs are r
 ## Limitations
 
 - Performance varies substantially between flood events and geographic domains.
-- The model detects open water. Permanent water bodies are often predicted as flood, while flooded vegetation, urban flooding and shallow water with no clear SAR signature are often missed.
+- The model detects open water. Permanent water bodies are often predicted as flood (the optional permanent-water mask removes most of these), while flooded vegetation, urban flooding and shallow water with no clear SAR signature are often missed.
 - Raw DEM did not improve cross-event performance enough to be included; this is not evidence that terrain is irrelevant.
 - Test metrics describe the designated dataset split and should not be treated as universal operational performance.
 - The model should not be the sole basis for emergency, evacuation, insurance, or life-safety decisions.

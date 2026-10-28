@@ -120,6 +120,15 @@ def _display_results(payload: dict) -> None:
     output_dir = Path(summary["output_dir"])
 
     st.success("Prediction complete")
+    water_states = [p.get("permanent_water") for p in predictions if p.get("permanent_water")]
+    failed_water = [w for w in water_states if not w.get("applied")]
+    if failed_water:
+        st.warning("The permanent-water layer could not be read for "
+                   f"{len(failed_water)} of {len(predictions)} tile(s), so those predictions include permanent water. "
+                   f"Reason: {failed_water[0].get('error', 'unknown')}")
+    elif water_states:
+        removed = sum(int(w.get("removed_flood_pixels", 0)) for w in water_states)
+        st.caption(f"Permanent water removed (JRC Global Surface Water, ≥50% occurrence): {removed:,} predicted pixels.")
     st.subheader("Flood prediction")
     if mosaic.get("created"):
         cols = st.columns(5)
@@ -345,6 +354,14 @@ st.session_state["floodmap_sar_units"] = _unit_labels[st.radio(
     horizontal=True,
     help="Uploads are converted to the units the model was trained on. Zero/NaN/no-data pixels are treated as missing.",
 )]
+st.session_state["floodmap_permanent_water"] = st.checkbox(
+    "Remove permanent water",
+    value=True,
+    help="Lakes, reservoirs and rivers that the JRC Global Surface Water layer records as water at least half the time "
+         "(1984-2020) are shown as non-flood. Flood labels exclude permanent water, and removing it cut false positives "
+         "by about a quarter in validation. Needs an internet connection; if the layer cannot be read, the prediction "
+         "is shown unmasked with a warning.",
+)
 
 needs_dem = _needs_dem(manifest_summary["modalities"])
 if needs_dem:
@@ -455,6 +472,7 @@ if run_clicked and sar_uploads:
                 display_inline=False,
                 output_mode="concise",
                 input_sar_units=st.session_state.get("floodmap_sar_units", "auto"),
+                permanent_water_threshold=50 if st.session_state.get("floodmap_permanent_water", True) else None,
             )
             predictions = summary.get("predictions") or []
             mosaic = build_collection_mosaic(predictions, output_dir / "collection") if len(predictions) > 1 else {

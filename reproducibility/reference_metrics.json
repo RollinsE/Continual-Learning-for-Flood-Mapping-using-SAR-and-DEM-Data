@@ -3,7 +3,10 @@
   "model": {
     "architecture": "unet",
     "encoder": "resnet34",
-    "modalities": ["vv", "vh"],
+    "modalities": [
+      "vv",
+      "vh"
+    ],
     "sar_units": "db10",
     "normalization_mode": "robust_minmax",
     "seed": 42,
@@ -19,21 +22,34 @@
   },
   "cross_validation": {
     "folds_planned": 5,
-    "folds_run": [0, 1],
-    "fold0_event_macro_f1": {"vv+vh": 0.4781, "vv+vh+dem": 0.4597}
+    "folds_run": [
+      0,
+      1
+    ],
+    "fold0_event_macro_f1": {
+      "vv+vh": 0.4781,
+      "vv+vh+dem": 0.4597
+    }
   },
   "threshold_calibration": {
     "source": "out-of-fold predictions, folds 0 and 1",
     "threshold": 0.8,
-    "event_macro_f1": 0.4240
+    "event_macro_f1": 0.424
   },
   "test": {
     "inference": "sliding_window, window 512, overlap 128",
     "metric_mode": "global",
-    "f1": 0.5200,
+    "f1": 0.52,
     "iou": 0.3514,
     "precision": 0.4391,
     "recall": 0.6374,
     "mcc": 0.5081
+  },
+  "test_with_permanent_water_mask": {
+    "mask": "JRC Global Surface Water occurrence >= 50% set to background before thresholding",
+    "selected_on": "validation split (F1 0.430 -> 0.461 at threshold 0.80)",
+    "threshold": 0.8,
+    "f1": 0.5492,
+    "f1_without_mask_same_tool": 0.5202
   }
 }

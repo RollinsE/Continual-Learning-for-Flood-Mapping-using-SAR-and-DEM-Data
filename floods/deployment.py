@@ -2349,7 +2349,8 @@ def _predict_candidate(candidate: SceneCandidate,
                        device: torch.device,
                        manifest_path: Path,
                        model_sar_units: str = "log1p",
-                       input_sar_units: str = "auto") -> dict[str, Any]:
+                       input_sar_units: str = "auto",
+                       permanent_water_threshold: Optional[int] = None) -> dict[str, Any]:
     _deploy_log("Reading SAR candidate %s", candidate.candidate_id)
     vv, vh, profile = _read_sar_arrays(candidate)
     _deploy_log("Building input stack: modalities=%s shape=%sx%s", ",".join(modalities), vv.shape[0], vv.shape[1])
@@ -2365,6 +2366,22 @@ def _predict_candidate(candidate: SceneCandidate,
         _deploy_log("No-data pixels excluded from the prediction: %d (%.2f%%)", nodata_pixels, 100.0 * nodata_pixels / valid.size)
     _deploy_log("Running inference: mode=%s window=%s overlap=%s models=%d", inference_mode, window_size, window_overlap, len(models))
     probability, uncertainty = _infer_probability(models, tensor, method, inference_mode, window_size, window_overlap, window_batch_size, window_blend)
+    permanent_water: Optional[dict[str, Any]] = None
+    if permanent_water_threshold is not None:
+        # Flood labels exclude permanent water, so pixels that are almost always wet are
+        # set to background before thresholding.
+        try:
+            from floods.water_mask import permanent_water_mask
+            water, permanent_water = permanent_water_mask(profile, probability.shape, int(permanent_water_threshold))
+            permanent_water["removed_flood_pixels"] = int((water & valid & (probability >= threshold)).sum())
+            probability = np.where(water, 0.0, probability).astype(np.float32)
+            _deploy_log("Permanent-water mask (JRC occurrence >= %d%%): %d water pixels, %d predicted flood pixels removed",
+                        int(permanent_water_threshold), permanent_water["water_pixels"],
+                        permanent_water["removed_flood_pixels"], level="summary")
+        except Exception as exc:  # network or coverage problems must not stop the prediction
+            permanent_water = {"applied": False, "occurrence_threshold_percent": int(permanent_water_threshold),
+                               "error": str(exc)}
+            LOG.warning("Permanent-water mask not applied for %s: %s", candidate.candidate_id, exc)
     _deploy_log("Applying threshold %.3f and component filter min_area=%d", threshold, min_component_area)
     pred = ((probability >= threshold) & valid).astype(np.uint8)
     pred = _apply_component_filter(pred, min_component_area)
@@ -2503,6 +2520,7 @@ def _predict_candidate(candidate: SceneCandidate,
         "flood_fraction": float(pred.sum() / max(1, int(valid.sum()))),
         "sar_input_units": str(input_sar_units),
         "model_sar_units": str(model_sar_units),
+        "permanent_water": permanent_water,
         "flood_area_km2": float(pred.sum() * pixel_area) if pixel_area is not None else None,
         "mask_path": str(mask_path) if mask_path else None,
         "mask_alignment": mask_alignment,
@@ -2662,11 +2680,17 @@ def predict_scene(manifest_path: Path,
                   window_blend: Optional[str] = None,
                   output_mode: str = "standard",
                   prediction_only: bool = False,
-                  input_sar_units: str = "auto") -> dict[str, Any]:
+                  input_sar_units: str = "auto",
+                  permanent_water_threshold: Optional[int] = None) -> dict[str, Any]:
     """Run deployment inference on one direct SAR/DEM scene or a discovered scene folder.
 
     ``input_sar_units`` describes the uploaded backscatter: ``auto`` (detect linear vs dB),
     ``linear`` or ``db``. It is converted to the units recorded in the bundle (``sar_units``).
+
+    ``permanent_water_threshold`` (percent, e.g. 50) sets pixels that the JRC Global Surface
+    Water layer records as water at least that often to background before thresholding.
+    It needs an internet connection; if the layer cannot be read the prediction continues
+    unmasked and the reason is recorded in the metadata.
     """
     _set_deploy_output_mode(output_mode)
     mosaic_mode = str(mosaic_mode or "smart").lower().strip()
@@ -2816,7 +2840,8 @@ def predict_scene(manifest_path: Path,
                                     device=torch_device,
                                     manifest_path=Path(manifest_path),
                                     model_sar_units=settings["sar_units"],
-                                    input_sar_units=input_sar_units)
+                                    input_sar_units=input_sar_units,
+                                    permanent_water_threshold=permanent_water_threshold)
         results.append(result)
 
     summary = {
