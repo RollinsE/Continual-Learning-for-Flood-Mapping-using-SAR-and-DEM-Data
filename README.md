@@ -33,13 +33,23 @@ The deployed model is a U-Net with an ImageNet-pretrained ResNet34 encoder and S
 | Test MCC | 0.508 |
 | Test F1 with permanent-water mask | **0.549** |
 
-Test metrics are pooled over all pixels of the held-out test split with the published labels. The permanent-water mask (JRC Global Surface Water, water at least 50% of the time, set to background before thresholding) was chosen on the validation split and then applied once to the test split. They are not a general estimate of performance on every flood event or location. See [`MODEL_CARD.md`](MODEL_CARD.md) and [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) for the evaluation setup and limitations.
+Test metrics are pooled over all pixels of the held-out test split with the published labels. They are not a general estimate of performance on every flood event or location. The permanent-water mask (JRC Global Surface Water, water at least 50% of the time, set to background before thresholding) was chosen on the validation split and then applied once to the test split. See [`MODEL_CARD.md`](MODEL_CARD.md) and [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) for the evaluation setup and limitations.
 
-![Ground truth, prediction and error map for one Sentinel-1 scene](docs/images/example_evaluation.jpg)
+### Examples
 
-*Example scene from MMFlood event EMSR107. The model detects open water, but most of the water it finds here is a
-large water body that the flood labels do not include (probably permanent water), so it counts as false positives
-(red). Flooded fringes with a weaker SAR signature are partly missed (blue). Contains modified Copernicus Sentinel data.*
+Two areas of the same flood event (EMSR107) show how much results can vary. Both images contain modified Copernicus
+Sentinel data.
+
+![Prediction and error map for an area where the model does well](docs/images/example_good_scene.jpg)
+
+*Area 5: most of the flooded area is found (green). The errors are mostly thin bands along flood edges. Across the four
+labelled tiles of this area, F1 is 0.79.*
+
+![Ground truth, prediction and error map for an area where the model struggles](docs/images/example_evaluation.jpg)
+
+*Area 1: most of the water the model finds is a large lake that the flood labels leave out, so it counts as false
+positives (red), and the flooded fringes are partly missed (blue). The permanent-water mask is aimed at this kind of
+error.*
 
 ## Data conventions
 

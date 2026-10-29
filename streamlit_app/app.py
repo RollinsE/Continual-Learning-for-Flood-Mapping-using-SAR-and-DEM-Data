@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 import shutil
 import tempfile
 import zipfile
@@ -79,6 +80,11 @@ def _reset_session() -> None:
     """Remove the previous results and empty the upload widgets."""
     _clear_previous_workspace()
     st.session_state["floodmap_upload_round"] = st.session_state.get("floodmap_upload_round", 0) + 1
+
+
+def _natural_key(value) -> list:
+    """Sort key that puts EMSR107-5-2 before EMSR107-5-10."""
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", str(value))]
 
 
 def _upload_signature(uploads) -> list[tuple[str, int]]:
@@ -199,6 +205,7 @@ def _display_results(payload: dict) -> None:
 
     if len(predictions) > 1:
         st.subheader("Per-tile results")
+        predictions = sorted(predictions, key=lambda item: _natural_key(item.get("candidate_id")))
         rows = []
         for item in predictions:
             area = item.get("flood_area_km2")
