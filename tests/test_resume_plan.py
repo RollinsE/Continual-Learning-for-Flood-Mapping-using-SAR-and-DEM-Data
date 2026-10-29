@@ -25,7 +25,7 @@ def _args(config_path: Path, output: Path, run_id: str, extra=None):
     return build_cli_parser().parse_args(argv)
 
 
-def test_resume_loads_authoritative_run_config(tmp_path: Path):
+def test_resume_loads_saved_run_config(tmp_path: Path):
     base = TrainConfig()
     base.output_folder = str(tmp_path)
     base.name = "baseline"

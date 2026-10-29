@@ -60,6 +60,6 @@ Training crop sizes before resize: 256=... 320=... 384=... 448=...
 
 A fallback means a requested crop could not satisfy the flood/valid-pixel rules and the full tile was used instead.
 
-## Authoritative validation metric
+## Validation metric used for checkpoints
 
 When threshold-sweep monitoring is enabled, the epoch summary reports all validation metrics at the selected threshold. The checkpoint metric and the displayed validation F1 therefore refer to the same operating point.

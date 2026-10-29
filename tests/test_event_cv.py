@@ -78,7 +78,7 @@ def test_event_cv_cli_parses_architectures_and_fold_subset(tmp_path):
     assert args.architectures[-1] == "segformer:pvt_v2_b0"
 
 
-def test_event_cv_plan_only_writes_leakage_free_fold_plan(tmp_path):
+def test_event_cv_plan_only_writes_event_disjoint_fold_plan(tmp_path):
     mask_dir = tmp_path / "processed" / "train" / "mask"
     mask_dir.mkdir(parents=True)
     for event, count in {"EMSR001": 3, "EMSR002": 2, "EMSR003": 2, "EMSR004": 1}.items():

@@ -45,7 +45,7 @@ def _load_training_config_for_args(args: argparse.Namespace) -> TrainConfig:
     """Load a fresh-run config or the preserved run config for strict resume.
 
     A resume command may point at the original baseline YAML for convenience, but once
-    a run directory exists its own config.yaml is authoritative. Explicit CLI changes
+    a run directory exists its own config.yaml takes precedence. Explicit CLI changes
     are applied to a copy and rejected when they alter training semantics. Runtime-only
     changes such as data location, device, worker count, and progress output remain safe.
     """
@@ -1304,7 +1304,7 @@ def build_cli_parser() -> argparse.ArgumentParser:
 
     cv_p = sub.add_parser(
         "event-cv",
-        help="Run leakage-controlled event-level cross-validation across architectures and modality sets.",
+        help="Run event-level cross-validation across architectures and modality sets.",
     )
     cv_p.add_argument("--config", type=Path, required=True, help="Base training YAML. Runs start from normal initialisation, never from a checkpoint.")
     cv_p.add_argument("--processed-data-dir", type=Path, required=True, help="Processed MMFlood dataset root.")

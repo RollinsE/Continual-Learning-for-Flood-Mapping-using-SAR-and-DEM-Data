@@ -491,7 +491,7 @@ def run_event_cross_validation(
                 stats_path = _normalization_path(output_dir, modalities, fold_idx)
                 if not stats_path.exists():
                     LOG.info(
-                        "Fitting leakage-free normalization: fold=%d | candidate=%s | modalities=%s | excluded events=%s",
+                        "Fitting normalization on the fold's training events: fold=%d | candidate=%s | modalities=%s | excluded events=%s",
                         fold_idx, resolved.label, modalities, held_out,
                     )
                     fit_normalization_stats(

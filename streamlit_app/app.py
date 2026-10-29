@@ -330,7 +330,7 @@ with st.sidebar:
     st.divider()
     st.caption("Community Cloud runs inference on CPU. Generated files are temporary for each app session.")
     st.info(
-        "Decision-support output only. Review predictions alongside source imagery and authoritative information; "
+        "Decision-support output only. Review predictions alongside source imagery and official information; "
         "do not use the model as the sole basis for life-safety decisions."
     )
 

@@ -18,7 +18,7 @@ The command:
 
 The audit does not change model weights. For events before 2020, the 1984-2020
 occurrence layer can include observations after the event, so results are a
-diagnostic rather than a leakage-free benchmark.
+diagnostic rather than a clean benchmark.
 
 Example targeted audit:
 

@@ -413,9 +413,9 @@ class Trainer:
 
         A disconnection can occur after the model and optimizer have already been
         updated by part of the current epoch. Overwriting ``last.ckpt`` with that
-        partial state used to make resume skip the remainder of the interrupted
-        epoch. Keep the completed checkpoint authoritative and write the partial
-        state to a separate file. If interruption happens in the first epoch, the
+        partial state would make resume skip the remainder of the interrupted
+        epoch, so the last completed checkpoint is kept and the partial state is
+        written to a separate file. If interruption happens in the first epoch, the
         partial checkpoint becomes ``last.ckpt`` but is marked incomplete so the
         same epoch restarts on resume.
         """
@@ -503,7 +503,7 @@ class Trainer:
         if val_loss is not None:
             fields.append(f"validation loss: {val_loss:.4f}")
         if self.best_threshold_result is not None:
-            # Report one authoritative validation operating point: the same
+            # Report a single validation operating point: the same
             # threshold-swept result used for checkpoint selection. This avoids
             # mixing fixed-0.5 metrics with the monitored best-threshold score.
             best = self.best_threshold_result

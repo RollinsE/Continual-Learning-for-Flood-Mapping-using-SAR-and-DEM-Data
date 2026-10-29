@@ -260,8 +260,8 @@ def apply_resolved_model_to_config(
 
     Provider adapters always impose their provider input convention.  Ordinary
     ImageNet/random encoders retain the normalization already declared by the base
-    configuration unless the caller explicitly asks to force the registry default.
-    This preserves authoritative configurations written by older package releases.
+    configuration unless the caller explicitly asks to force the registry default,
+    so a saved run configuration is reproduced as written.
     """
     config.model.weights_source = resolved.weights_source
     config.model.encoder = resolved.encoder
