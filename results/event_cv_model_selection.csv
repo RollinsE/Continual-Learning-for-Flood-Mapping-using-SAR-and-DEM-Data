@@ -1,0 +1,6 @@
+experiment,inputs,fold_0,fold_1
+"U-Net ResNet34, ImageNet, BCE + Tversky (beta 0.7), pos weight up to 20",VV+VH,0.478,0.370
+"Same, with DEM",VV+VH+DEM,0.460,
+"Balanced loss (pos weight up to 5, alpha = beta = 0.5), with DEM",VV+VH+DEM,0.475,
+"Balanced loss (pos weight up to 5, alpha = beta = 0.5)",VV+VH,0.471,0.372
+"U-Net ResNet50, SSL4EO-S1 DeCUR weights",VV+VH,0.491,0.366

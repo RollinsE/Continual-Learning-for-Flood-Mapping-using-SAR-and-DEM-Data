@@ -1,0 +1,6 @@
+strategy,seeds,runs,final_f1_mean,final_f1_std,plasticity_mean,plasticity_std,forgetting_mean,forgetting_std,bwt_mean,bwt_std
+finetune,3,cl_region_r34;cl_region_r34_s1;cl_region_r34_s2,0.4911,0.0088,0.5051,0.0029,0.0279,0.0152,-0.0279,0.0152
+random,1,cl_region_r34,0.5056,,0.5179,,0.0245,,-0.0245,
+entropy,1,cl_region_r34,0.5054,,0.5120,,0.0131,,-0.0131,
+hybrid,3,cl_region_r34;cl_region_r34_s1;cl_region_r34_s2,0.5040,0.0187,0.5072,0.0179,0.0067,0.0089,-0.0063,0.0094
+joint,3,cl_region_r34;cl_region_r34_s1;cl_region_r34_s2,0.5361,0.0050,0.5334,0.0016,0.0031,0.0054,0.0055,0.0132

@@ -64,7 +64,9 @@ Run `python scripts/pipeline_smoke_test.py` (a few minutes on CPU) before any lo
 
 ## Continual learning
 
-`floodmap continual-train` trains on a sequence of tasks (by event year or by region) and compares rehearsal strategies against no-replay fine-tuning and cumulative joint training. On a Europe → rest-of-world split (three seeds, 100-tile buffer, fixed threshold 0.80), fine-tuning forgot 0.028 ± 0.015 F1 on Europe, hybrid rehearsal reduced this to 0.007 ± 0.009, and joint training reached the highest final F1 (0.536 ± 0.005). Across year-based tasks, forgetting was negligible for every strategy. See [`docs/CONTINUAL_LEARNING.md`](docs/CONTINUAL_LEARNING.md).
+`floodmap continual-train` trains on a sequence of tasks (by event year or by region) and keeps a small buffer of earlier tiles to replay while learning each new task. The replay strategies are random, least-confidence (margin sampling picks the same tiles), entropy-weighted and hybrid (half entropy-weighted, half random). They are compared with fine-tuning without replay and with joint training on all data seen so far.
+
+On a Europe → rest-of-world split (three seeds, 100-tile buffer, fixed threshold 0.80), fine-tuning forgot 0.028 ± 0.015 F1 on Europe, hybrid replay reduced this to 0.007 ± 0.009, and joint training reached the highest final F1 (0.536 ± 0.005). Uncertainty-based replay picked tiles with more flood in them but did not beat random replay on final accuracy. Across year-based tasks, forgetting was negligible for every strategy. Full tables are in [`docs/CONTINUAL_LEARNING.md`](docs/CONTINUAL_LEARNING.md) and the result files in [`results/`](results/).
 
 ## What the package supports
 
@@ -89,6 +91,7 @@ floods/                  Python package and CLI implementation
 docs/                    Data, deployment, validation and reproducibility guides
 notebooks/               Colab notebook that runs the full workflow
 reproducibility/         Machine-readable reference metrics
+results/                 Result tables from the experiments (CSV)
 scripts/                 Installation, smoke-test and environment helpers
 streamlit_app/           Streamlit prediction interface
 tests/                   Automated regression tests

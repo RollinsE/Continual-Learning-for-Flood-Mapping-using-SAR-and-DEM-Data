@@ -1,0 +1,4 @@
+buffer_tiles,run,final_f1,plasticity,forgetting,bwt
+50,cl_region_r34_buf50,0.5325,0.5342,0.0034,-0.0034
+100,cl_region_r34,0.5231,0.5225,0.0000,0.0012
+150,cl_region_r34_buf150,0.5351,0.5275,0.0000,0.0153

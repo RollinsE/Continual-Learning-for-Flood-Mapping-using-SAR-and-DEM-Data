@@ -51,5 +51,83 @@
     "threshold": 0.8,
     "f1": 0.5492,
     "f1_without_mask_same_tool": 0.5202
+  },
+  "continual_learning": {
+    "protocol": "U-Net ResNet34, VV+VH, 5 epochs per task, replay batch 8, fixed threshold 0.80, F1 on each task's test scenes",
+    "region_split": {
+      "tasks": [
+        "europe",
+        "asia+americas+africa+oceania"
+      ],
+      "buffer_tiles": 100,
+      "seeds": [
+        42,
+        1,
+        2
+      ],
+      "final_f1": {
+        "finetune": [
+          0.4911,
+          0.0088
+        ],
+        "hybrid": [
+          0.504,
+          0.0187
+        ],
+        "joint": [
+          0.5361,
+          0.005
+        ]
+      },
+      "forgetting": {
+        "finetune": [
+          0.0279,
+          0.0152
+        ],
+        "hybrid": [
+          0.0067,
+          0.0089
+        ],
+        "joint": [
+          0.0031,
+          0.0054
+        ]
+      },
+      "values": "[mean, std] over seeds",
+      "seed42_only": {
+        "random": {
+          "final_f1": 0.5056,
+          "forgetting": 0.0245
+        },
+        "entropy": {
+          "final_f1": 0.5054,
+          "forgetting": 0.0131
+        }
+      }
+    },
+    "year_split": {
+      "tasks": [
+        "2014-2017",
+        "2018-2019",
+        "2020-2021"
+      ],
+      "buffer_tiles": 100,
+      "seed": 42,
+      "final_f1": {
+        "finetune": 0.4598,
+        "random": 0.4412,
+        "entropy": 0.4508,
+        "hybrid": 0.4463,
+        "joint": 0.4487
+      },
+      "forgetting": {
+        "finetune": 0.0087,
+        "random": 0.0146,
+        "entropy": 0.0035,
+        "hybrid": 0.0028,
+        "joint": 0.0
+      }
+    },
+    "files": "results/"
   }
 }
